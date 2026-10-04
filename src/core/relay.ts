@@ -80,10 +80,14 @@ export async function pipeVideoToClient(options: RelayStreamOptions): Promise<vo
     ...stream.headers,
   };
 
-  // Forward client Range header for seeking
+  // Forward client Range header for seeking; HEAD probes a single byte so we
+  // only pay for headers instead of the full body.
+  const isHead = req.method === "HEAD";
   const clientRange = req.headers.range;
   if (clientRange) {
     upstreamHeaders.range = clientRange;
+  } else if (isHead) {
+    upstreamHeaders.range = "bytes=0-0";
   }
 
   let upstreamRes;
@@ -189,14 +193,46 @@ export async function pipeVideoToClient(options: RelayStreamOptions): Promise<vo
   if (rawHeaders["content-range"]) {
     forwardHeaders["content-range"] = rawHeaders["content-range"];
   }
-  if (rawHeaders["accept-ranges"]) {
-    forwardHeaders["accept-ranges"] = rawHeaders["accept-ranges"];
-  }
+  forwardHeaders["accept-ranges"] = rawHeaders["accept-ranges"] ?? "bytes";
   if (rawHeaders["last-modified"]) {
     forwardHeaders["last-modified"] = rawHeaders["last-modified"];
   }
   if (rawHeaders.etag) {
     forwardHeaders.etag = rawHeaders.etag;
+  }
+
+  if (isHead) {
+    reply.raw.writeHead(headStatus(), headHeaders());
+    upstreamBody.destroy();
+    reply.raw.off("close", onClientClose);
+    reply.raw.end();
+    return;
+  }
+
+  // HEAD semantics: mirror what GET would return. Content-Length must describe
+  // the full resource when the client did not ask for a range.
+  function headStatus(): number {
+    if (clientRange) return statusCode;
+    return rawHeaders["content-range"] ? 200 : statusCode;
+  }
+
+  function headHeaders(): Record<string, string | number | string[]> {
+    const out = { ...forwardHeaders };
+    const cr = rawHeaders["content-range"];
+    if (cr) {
+      const m = /bytes\s+(\d+)-(\d+)\/(\d+)/.exec(String(cr));
+      if (clientRange) {
+        out["content-range"] = cr;
+        if (m) out["content-length"] = Number(m[2]) - Number(m[1]) + 1;
+      } else if (m) {
+        delete out["content-range"];
+        out["content-length"] = Number(m[3]);
+      }
+    }
+    if (out["content-length"] === undefined && rawHeaders["content-length"]) {
+      out["content-length"] = rawHeaders["content-length"];
+    }
+    return out;
   }
 
   const idleStream = createIdleTimeoutStream(idleTimeoutMs, () => {

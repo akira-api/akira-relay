@@ -1,0 +1,33 @@
+{
+  "name": "akira-relay",
+  "version": "1.0.0",
+  "type": "module",
+  "description": "IP-bound video relay and resolver service for Akira",
+  "main": "dist/server.js",
+  "scripts": {
+    "dev": "tsx watch src/server.ts",
+    "build": "tsc",
+    "start": "node --max-old-space-size=192 dist/server.js",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "keywords": [
+    "relay",
+    "fastify",
+    "streaming"
+  ],
+  "author": "",
+  "license": "MIT",
+  "dependencies": {
+    "@fastify/cors": "^11.3.0",
+    "dotenv": "^18.0.5",
+    "fastify": "^5.12.5",
+    "undici": "^8.11.2"
+  },
+  "devDependencies": {
+    "@types/node": "^26.6.4",
+    "tsx": "^4.23.15",
+    "typescript": "^7.0.2",
+    "vitest": "^5.0.3"
+  }
+}

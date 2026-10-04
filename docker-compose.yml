@@ -1,0 +1,44 @@
+services:
+  relay:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: akira-relay
+    restart: unless-stopped
+    ports:
+      - "3000:3000"
+    env_file:
+      - .env
+    environment:
+      - PORT=3000
+      - NODE_ENV=production
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:3000/internal/health"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 5s
+    networks:
+      - relay-net
+
+  cloudflared:
+    image: cloudflare/cloudflared:latest
+    container_name: akira-relay-tunnel
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      - TUNNEL_TOKEN=${RELAY_TUNNEL_TOKEN}
+    depends_on:
+      relay:
+        condition: service_healthy
+    networks:
+      - relay-net
+
+networks:
+  relay-net:
+    driver: bridge

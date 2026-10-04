@@ -87,24 +87,32 @@ describe("Fastify Stream API", () => {
   });
 
   it("exposes stats via /internal/stats", async () => {
-    const { app } = await createServer({ secret });
-    const res = await app.inject({
-      method: "GET",
-      url: "/internal/stats",
-    });
+    const prevKey = process.env.INTERNAL_RELAY_KEY;
+    delete process.env.INTERNAL_RELAY_KEY;
+    try {
+      const { app } = await createServer({ secret });
+      const res = await app.inject({
+        method: "GET",
+        url: "/internal/stats",
+      });
 
-    expect(res.statusCode).toBe(200);
-    const body = JSON.parse(res.body);
-    expect(body).toHaveProperty("uptimeSec");
-    expect(body).toHaveProperty("memory");
-    expect(body.cache).toHaveProperty("hits");
-    expect(body.cache).toHaveProperty("misses");
-    expect(body.cache).toHaveProperty("negativeHits");
-    expect(body.cache).toHaveProperty("staleHits");
-    expect(body.streams).toHaveProperty("bytesStreamed");
-    expect(body.limits).toHaveProperty("rateLimitRejections");
-    expect(body).toHaveProperty("errorsByCode");
-    await app.close();
+      expect(res.statusCode).toBe(200);
+      const body = JSON.parse(res.body);
+      expect(body).toHaveProperty("uptimeSec");
+      expect(body).toHaveProperty("memory");
+      expect(body.cache).toHaveProperty("hits");
+      expect(body.cache).toHaveProperty("misses");
+      expect(body.cache).toHaveProperty("negativeHits");
+      expect(body.cache).toHaveProperty("staleHits");
+      expect(body.streams).toHaveProperty("bytesStreamed");
+      expect(body.limits).toHaveProperty("rateLimitRejections");
+      expect(body).toHaveProperty("errorsByCode");
+      await app.close();
+    } finally {
+      if (prevKey !== undefined) {
+        process.env.INTERNAL_RELAY_KEY = prevKey;
+      }
+    }
   });
 
   it("rejects stats without X-Relay-Key when key is configured", async () => {

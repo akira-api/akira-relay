@@ -126,13 +126,13 @@ describe("Batch Resolve Endpoint", () => {
       payload: {
         sources: [
           // 720p: will fail all candidates -> omitted from streams
-          { site: "acefile", quality: "720p", url: "https://acefile.co/f/broken-720" },
+          { server: "acefile", resolution: "720p", url: "https://acefile.co/f/broken-720" },
           // 1080p: candidate 1 succeeds -> candidate 2 skipped
-          { site: "acefile", quality: "1080p", url: "https://acefile.co/f/good-1080" },
-          { site: "blogger", quality: "1080p", url: "https://blogger.com/video.g?token=not-reached-1080" },
+          { server: "acefile", resolution: "1080p", url: "https://acefile.co/f/good-1080" },
+          { server: "blogger", resolution: "1080p", url: "https://blogger.com/video.g?token=not-reached-1080" },
           // 2160p: candidate 1 fails -> candidate 2 succeeds
-          { site: "acefile", quality: "2160p", url: "https://acefile.co/f/broken-2160" },
-          { site: "blogger", quality: "2160p", url: "https://blogger.com/video.g?token=good-2160" },
+          { server: "acefile", resolution: "2160p", url: "https://acefile.co/f/broken-2160" },
+          { server: "blogger", resolution: "2160p", url: "https://blogger.com/video.g?token=good-2160" },
         ],
       },
     });
@@ -141,9 +141,12 @@ describe("Batch Resolve Endpoint", () => {
     const body = JSON.parse(res.body);
     expect(body.streams).toHaveLength(2);
 
-    // Sorted descending by quality
-    expect(body.streams[0].quality).toBe("2160p");
-    expect(body.streams[1].quality).toBe("1080p");
+    // Sorted descending by resolution
+    expect(body.streams[0].resolution).toBe("2160p");
+    expect(body.streams[0].server).toBe("blogger");
+
+    expect(body.streams[1].resolution).toBe("1080p");
+    expect(body.streams[1].server).toBe("acefile");
 
     // Verify stream url format and signature
     const url2160 = new URL(body.streams[0].url, "http://localhost");
@@ -162,6 +165,35 @@ describe("Batch Resolve Endpoint", () => {
 
     // Candidate 2 for 1080p was never called
     expect(resolveSpy).not.toHaveBeenCalledWith("https://blogger.com/video.g?token=not-reached-1080");
+
+    await app.close();
+  });
+
+  it("supports legacy site and quality fields in request payload", async () => {
+    const { app, resolver } = await createServer({ secret });
+
+    vi.spyOn(resolver, "resolve").mockImplementation(async () => {
+      return {
+        directUrl: "https://acefile.co/service/play/1080",
+        ttlMs: 7200000,
+      };
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/resolve",
+      payload: {
+        sources: [
+          { site: "acefile", quality: "1080p", url: "https://acefile.co/f/1080" },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.streams).toHaveLength(1);
+    expect(body.streams[0].resolution).toBe("1080p");
+    expect(body.streams[0].server).toBe("acefile");
 
     await app.close();
   });

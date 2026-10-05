@@ -14,8 +14,16 @@ export interface InternalRouteOptions {
 }
 
 export interface SourceCandidate {
+  server?: string;
   site?: string;
-  quality: string;
+  resolution?: string;
+  quality?: string;
+  url: string;
+}
+
+export interface ResolvedStreamItem {
+  resolution: string;
+  server: string;
   url: string;
 }
 
@@ -23,12 +31,25 @@ export interface ResolveRequestBody {
   sources?: SourceCandidate[];
 }
 
-export function parseQualityScore(quality: string): number {
-  const clean = quality.toLowerCase().trim();
+export function parseResolutionScore(resolution: string): number {
+  const clean = resolution.toLowerCase().trim();
   if (clean === "4k" || clean === "2160p") return 2160;
   if (clean === "2k" || clean === "1440p") return 1440;
   const match = clean.match(/(\d+)/);
   return match ? Number.parseInt(match[1], 10) : 0;
+}
+
+export const parseQualityScore = parseResolutionScore;
+
+export function detectServer(url: string): string {
+  try {
+    const host = new URL(url).hostname.toLowerCase();
+    if (host.includes("acefile.co")) return "acefile";
+    if (host.includes("blogger.com")) return "blogger";
+    return host;
+  } catch {
+    return "unknown";
+  }
 }
 
 function checkAuth(
@@ -114,40 +135,46 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
       });
     }
 
-    // Group candidates by quality
+    // Group candidates by resolution
     const groups = new Map<string, SourceCandidate[]>();
     for (const item of sources) {
-      if (!item || typeof item.url !== "string" || typeof item.quality !== "string") {
+      if (!item || typeof item.url !== "string") {
         continue;
       }
-      const q = item.quality.trim();
-      if (!q) continue;
-      const list = groups.get(q) ?? [];
+      const rawRes = item.resolution || item.quality;
+      if (typeof rawRes !== "string") continue;
+      const resName = rawRes.trim();
+      if (!resName) continue;
+      const list = groups.get(resName) ?? [];
       list.push(item);
-      groups.set(q, list);
+      groups.set(resName, list);
     }
 
-    // Sort qualities descending (highest resolution first)
-    const sortedQualities = Array.from(groups.keys()).sort(
-      (a, b) => parseQualityScore(b) - parseQualityScore(a),
+    // Sort resolutions descending (highest resolution first)
+    const sortedResolutions = Array.from(groups.keys()).sort(
+      (a, b) => parseResolutionScore(b) - parseResolutionScore(a),
     );
 
-    // Hybrid resolve: parallel across qualities, sequential fallback within each quality
+    // Hybrid resolve: parallel across resolutions, sequential fallback within each resolution
     const results = await Promise.all(
-      sortedQualities.map(async (quality) => {
-        const candidates = groups.get(quality)!;
+      sortedResolutions.map(async (resolution) => {
+        const candidates = groups.get(resolution)!;
         for (const candidate of candidates) {
           try {
-            const streamTarget = `${candidate.url}#${quality.toLowerCase()}`;
-            await resolver.resolve(streamTarget, undefined, quality);
+            const streamTarget = `${candidate.url}#${resolution.toLowerCase()}`;
+            await resolver.resolve(streamTarget, undefined, resolution);
             const { path } = signStreamUrl(streamTarget, opts.secret, 7200);
+            const serverName =
+              candidate.server || candidate.site || detectServer(candidate.url);
             return {
-              quality,
+              resolution,
+              server: serverName,
               url: path,
             };
           } catch (err: any) {
+            const sName = candidate.server || candidate.site || "unknown";
             logger.warn(
-              `Candidate failed for ${quality} [${candidate.site || "unknown"}] (${candidate.url}): ${err?.message || err}`,
+              `Candidate failed for ${resolution} [${sName}] (${candidate.url}): ${err?.message || err}`,
             );
             continue;
           }
@@ -157,7 +184,7 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
     );
 
     const streams = results.filter(
-      (r): r is { quality: string; url: string } => r !== null,
+      (r): r is ResolvedStreamItem => r !== null,
     );
 
     return { streams };

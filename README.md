@@ -16,7 +16,7 @@ Lightweight video stream relay and resolver service designed to stream media fro
 
 ### `POST /internal/resolve` (or `POST /v1/resolve`)
 
-Batch resolver for Akira backend. Accepts candidate sources grouped by quality, runs hybrid resolution (parallel across qualities, sequential fallback within each quality), and returns signed `/v1/stream` URLs.
+Batch resolver for Akira backend. Accepts candidate sources grouped by resolution, runs hybrid resolution (parallel across resolutions, sequential fallback within each resolution), and returns signed `/v1/stream` URLs.
 
 - **Auth**: Send `X-Relay-Key: <key>` header or `Authorization: Bearer <key>` (checked when `INTERNAL_RELAY_KEY` is configured).
 
@@ -24,35 +24,39 @@ Batch resolver for Akira backend. Accepts candidate sources grouped by quality, 
 ```json
 {
   "sources": [
-    { "site": "acefile", "quality": "2160p", "url": "https://acefile.co/f/111" },
-    { "site": "blogger", "quality": "2160p", "url": "https://www.blogger.com/video.g?token=aaa" },
-    { "site": "acefile", "quality": "1080p", "url": "https://acefile.co/f/222" },
-    { "site": "blogger", "quality": "720p",  "url": "https://www.blogger.com/video.g?token=bbb" }
+    { "server": "acefile", "resolution": "2160p", "url": "https://acefile.co/f/111" },
+    { "server": "blogger", "resolution": "2160p", "url": "https://www.blogger.com/video.g?token=aaa" },
+    { "server": "acefile", "resolution": "1080p", "url": "https://acefile.co/f/222" },
+    { "server": "blogger", "resolution": "720p",  "url": "https://www.blogger.com/video.g?token=bbb" }
   ]
 }
 ```
+*(Catatan: backward compatible dengan field `site` dan `quality`).*
 
 #### Response (200 OK)
 ```json
 {
   "streams": [
     {
-      "quality": "2160p",
+      "resolution": "2160p",
+      "server": "acefile",
       "url": "/v1/stream?u=...&e=...&s=..."
     },
     {
-      "quality": "1080p",
+      "resolution": "1080p",
+      "server": "acefile",
       "url": "/v1/stream?u=...&e=...&s=..."
     },
     {
-      "quality": "720p",
+      "resolution": "720p",
+      "server": "blogger",
       "url": "/v1/stream?u=...&e=...&s=..."
     }
   ]
 }
 ```
 
-Qualities where all candidates fail are automatically excluded from the output.
+Resolusi di mana seluruh kandidat gagal secara otomatis tidak disertakan pada array `streams`.
 
 ### `GET /v1/stream`
 

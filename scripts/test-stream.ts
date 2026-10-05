@@ -21,7 +21,7 @@ async function main() {
   // Test batch resolve endpoint
   logger.info("Testing batch resolve via POST /internal/resolve...");
   try {
-    const site = TARGET_URL.includes("blogger.com") ? "blogger" : "acefile";
+    const server = TARGET_URL.includes("blogger.com") ? "blogger" : "acefile";
     const res = await app.inject({
       method: "POST",
       url: "/internal/resolve",
@@ -29,13 +29,13 @@ async function main() {
       payload: {
         sources: [
           {
-            site,
-            quality: "1080p",
+            server,
+            resolution: "1080p",
             url: TARGET_URL,
           },
           {
-            site,
-            quality: "720p",
+            server,
+            resolution: "720p",
             url: TARGET_URL,
           },
         ],
@@ -46,7 +46,7 @@ async function main() {
     logger.info(`Batch resolve status: ${res.statusCode}`);
     if (body.streams && body.streams.length > 0) {
       for (const s of body.streams) {
-        logger.info(`[${s.quality}] -> http://localhost:${PORT}${s.url}`);
+        logger.info(`[${s.resolution}] (${s.server}) -> http://localhost:${PORT}${s.url}`);
       }
     } else {
       logger.warn(`No playable streams returned: ${res.body}`);

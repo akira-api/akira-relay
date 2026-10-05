@@ -18,6 +18,35 @@ function formatTime(): string {
   return `${h}:${m}:${s}`;
 }
 
+export function formatRequestUrl(rawUrl: string): string {
+  try {
+    const parsed = new URL(rawUrl, "http://localhost");
+    if (parsed.pathname === "/v1/stream") {
+      const u = parsed.searchParams.get("u");
+      if (u) {
+        try {
+          const decoded = Buffer.from(u, "base64url").toString("utf-8");
+          const target = new URL(decoded);
+          const token = target.searchParams.get("token");
+          let cleanDesc = `${target.hostname}${target.pathname}`;
+          if (token) {
+            cleanDesc += `?token=${token.slice(0, 8)}...`;
+          }
+          if (target.hash) {
+            cleanDesc += target.hash;
+          }
+          return `/v1/stream [${cleanDesc}]`;
+        } catch {
+          return "/v1/stream [malformed-token]";
+        }
+      }
+    }
+    return rawUrl;
+  } catch {
+    return rawUrl;
+  }
+}
+
 export type LogLevel = "debug" | "info" | "warn" | "error";
 
 class Logger {
@@ -61,21 +90,32 @@ class Logger {
     }
   }
 
-  request(method: string, url: string, ip?: string): void {
-    const ipStr = ip ? ` ${ANSI.gray}(${ip})${ANSI.reset}` : "";
-    console.log(
-      `${this.formatPrefix("info")} ${ANSI.cyan}${method}${ANSI.reset} ${url}${ipStr}`,
-    );
-  }
-
-  response(method: string, url: string, status: number, durationMs: number): void {
+  http(
+    method: string,
+    url: string,
+    status: number,
+    durationMs: number,
+    ip?: string,
+  ): void {
     let statusColor = ANSI.green;
     if (status >= 400 && status < 500) statusColor = ANSI.yellow;
     if (status >= 500) statusColor = ANSI.red;
 
+    const formattedUrl = formatRequestUrl(url);
+    const ipStr = ip ? ` ${ANSI.gray}(${ip})${ANSI.reset}` : "";
+    const durationStr = ` ${ANSI.gray}+${Math.round(durationMs)}ms${ANSI.reset}`;
+
     console.log(
-      `${this.formatPrefix("info")} ${ANSI.cyan}${method}${ANSI.reset} ${url} ${statusColor}${status}${ANSI.reset} ${ANSI.gray}+${Math.round(durationMs)}ms${ANSI.reset}`,
+      `${this.formatPrefix("info")} ${ANSI.cyan}${method}${ANSI.reset} ${formattedUrl} ${statusColor}${status}${ANSI.reset}${ipStr}${durationStr}`,
     );
+  }
+
+  request(_method: string, _url: string, _ip?: string): void {
+    // Deprecated in favor of single-line http() on response
+  }
+
+  response(method: string, url: string, status: number, durationMs: number): void {
+    this.http(method, url, status, durationMs);
   }
 }
 

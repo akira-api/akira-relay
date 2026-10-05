@@ -41,11 +41,13 @@ export class StreamResolver {
     allowedHosts?: string[];
     resolveTimeoutMs?: number;
     metrics?: Metrics;
+    dbPath?: string;
   }) {
     this.metrics = options.metrics;
     this.cache = new ResolveCache(
-      options.cacheTtlMs ?? 15 * 60 * 1000,
+      options.cacheTtlMs ?? 2 * 60 * 60 * 1000,
       options.metrics,
+      options.dbPath,
     );
     this.allowedHosts = options.allowedHosts ?? [
       "acefile.co",
@@ -59,12 +61,25 @@ export class StreamResolver {
   async resolve(
     targetUrl: string,
     onUpstreamFetch?: () => void,
+    targetQuality?: string,
   ): Promise<ResolvedStream> {
     let parsed: URL;
     try {
       parsed = new URL(targetUrl);
     } catch {
       throw new RelayError("INVALID_TOKEN", "Malformed target URL", 400);
+    }
+
+    if (
+      parsed.pathname.startsWith("/v1/stream") ||
+      parsed.searchParams.has("u") ||
+      parsed.searchParams.has("s")
+    ) {
+      throw new RelayError(
+        "INVALID_TOKEN",
+        "Recursive relay stream URL is not permitted as target URL",
+        400,
+      );
     }
 
     if (!isHostAllowed(parsed.hostname, this.allowedHosts)) {
@@ -75,7 +90,16 @@ export class StreamResolver {
       );
     }
 
-    const key = normalizeTargetUrl(targetUrl);
+    const effectiveQuality =
+      targetQuality ||
+      (parsed.hash ? parsed.hash.replace(/^#/, "") : undefined);
+
+    const baseUrl = targetUrl.split("#")[0];
+    const normalizedBase = normalizeTargetUrl(baseUrl);
+    const key = effectiveQuality
+      ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
+      : normalizedBase;
+
     const lookup = this.cache.lookup(key);
 
     if (lookup.state === "fresh") {
@@ -106,7 +130,7 @@ export class StreamResolver {
 
     try {
       const stream = await this.cache.begin(key, () =>
-        this.fetchDirect(targetUrl, key, parsed.hostname),
+        this.fetchDirect(baseUrl, key, parsed.hostname, effectiveQuality),
       );
       if (this.metrics) {
         this.metrics.resolve.ok++;
@@ -141,14 +165,37 @@ export class StreamResolver {
     targetUrl: string,
     key: string,
     hostname: string,
+    effectiveQuality?: string,
   ): Promise<ResolvedStream> {
     const host = hostname.toLowerCase();
 
     let stream: ResolvedStream;
     if (host.includes("acefile.co")) {
-      stream = await resolveAcefile(key, this.resolveTimeoutMs);
+      const cleanUrl = key.split("#")[0];
+      stream = await resolveAcefile(cleanUrl, this.resolveTimeoutMs);
     } else if (host.includes("blogger.com")) {
-      stream = await resolveBlogger(key, this.resolveTimeoutMs);
+      const cleanUrl = key.split("#")[0];
+      const bloggerRes = await resolveBlogger(
+        cleanUrl,
+        this.resolveTimeoutMs,
+        effectiveQuality,
+      );
+      stream = bloggerRes;
+
+      // Pre-cache other qualities returned by blogger RPC
+      if (bloggerRes.allStreams && bloggerRes.allStreams.length > 0) {
+        const baseKey = normalizeTargetUrl(targetUrl.split("#")[0]);
+        for (const s of bloggerRes.allStreams) {
+          const qualKey = `${baseKey}#${s.quality.toLowerCase()}`;
+          if (qualKey !== key) {
+            this.cache.setStream(qualKey, {
+              directUrl: s.directUrl,
+              headers: stream.headers,
+              ttlMs: stream.ttlMs,
+            });
+          }
+        }
+      }
     } else {
       // Direct/passthrough video stream (e.g. googlevideo or direct mp4/m3u8)
       stream = {

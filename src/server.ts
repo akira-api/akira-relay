@@ -20,6 +20,8 @@ export interface ServerConfig {
   resolveCacheTtlMs?: number;
   idleTimeoutMs?: number;
   resolveTimeoutMs?: number;
+  sqliteDbPath?: string;
+  internalRelayKey?: string;
 }
 
 export function loadConfigFromEnv(): ServerConfig {
@@ -47,7 +49,7 @@ export function loadConfigFromEnv(): ServerConfig {
     rateLimitRpm: Number.parseInt(process.env.RATE_LIMIT_RPM || "60", 10),
     rateLimitBurst: Number.parseInt(process.env.RATE_LIMIT_BURST || "30", 10),
     resolveCacheTtlMs: Number.parseInt(
-      process.env.RESOLVE_CACHE_TTL_MS || "900000",
+      process.env.RESOLVE_CACHE_TTL_MS || "7200000",
       10,
     ),
     idleTimeoutMs: Number.parseInt(process.env.IDLE_TIMEOUT_MS || "20000", 10),
@@ -55,6 +57,8 @@ export function loadConfigFromEnv(): ServerConfig {
       process.env.RESOLVE_TIMEOUT_MS || "10000",
       10,
     ),
+    sqliteDbPath: process.env.SQLITE_DB_PATH || "./data/relay.db",
+    internalRelayKey: process.env.INTERNAL_RELAY_KEY,
   };
 }
 
@@ -118,6 +122,7 @@ export async function createServer(
     cacheTtlMs: config.resolveCacheTtlMs,
     allowedHosts: config.allowedHosts,
     resolveTimeoutMs: config.resolveTimeoutMs,
+    dbPath: config.sqliteDbPath,
     metrics,
   });
 
@@ -136,8 +141,14 @@ export async function createServer(
     });
   });
 
-  // Healthcheck + stats endpoints
-  await app.register(internalRoutes, { resolver, limits, metrics });
+  // Healthcheck, stats, and batch resolve endpoints
+  await app.register(internalRoutes, {
+    resolver,
+    limits,
+    metrics,
+    secret: config.secret,
+    internalRelayKey: config.internalRelayKey,
+  });
 
   await app.register(streamRoute, {
     secret: config.secret,

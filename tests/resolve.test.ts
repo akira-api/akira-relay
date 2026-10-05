@@ -1,3 +1,6 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
 import { ResolveCache } from "../src/resolve/cache.js";
 import {
@@ -112,5 +115,49 @@ describe("Resolve & Cache", () => {
     }
 
     resolver.destroy();
+  });
+
+  it("rejects recursive relay stream target URLs", async () => {
+    const resolver = new StreamResolver({
+      allowedHosts: ["acefile.co", "akira-relay.navierr.dev"],
+    });
+
+    await expect(
+      resolver.resolve("https://akira-relay.navierr.dev/v1/stream?u=abc&s=123"),
+    ).rejects.toThrow(RelayError);
+
+    try {
+      await resolver.resolve("https://akira-relay.navierr.dev/v1/stream?u=abc&s=123");
+    } catch (err: any) {
+      expect(err.code).toBe("INVALID_TOKEN");
+      expect(err.statusCode).toBe(400);
+    }
+
+    resolver.destroy();
+  });
+
+  it("persists entries across cache instances using SQLite file", () => {
+    const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "akira-cache-test-"));
+    const dbPath = path.join(tmpDir, "test.db");
+
+    try {
+      const cache1 = new ResolveCache(7200000, undefined, dbPath);
+      cache1.setStream("test-url-1", {
+        directUrl: "https://cdn.example.com/disk.mp4",
+        ttlMs: 7200000,
+      });
+      cache1.destroy();
+
+      // Open new instance on same file
+      const cache2 = new ResolveCache(7200000, undefined, dbPath);
+      const lookup = cache2.lookup("test-url-1");
+      expect(lookup.state).toBe("fresh");
+      if (lookup.state === "fresh") {
+        expect(lookup.stream.directUrl).toBe("https://cdn.example.com/disk.mp4");
+      }
+      cache2.destroy();
+    } finally {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    }
   });
 });

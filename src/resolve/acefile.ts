@@ -37,7 +37,7 @@ export async function resolveAcefile(
       headers: { "User-Agent": DEFAULT_UA },
       signal,
     });
-    if (res.status === 404 || res.status === 410) {
+    if (!res.ok) {
       throw new RelayError(
         "VIDEO_UNAVAILABLE",
         `Acefile player returned ${res.status}`,
@@ -45,21 +45,13 @@ export async function resolveAcefile(
         res.status,
       );
     }
-    if (!res.ok) {
-      throw new RelayError(
-        "UPSTREAM_ERROR",
-        `Acefile player request failed with status ${res.status}`,
-        502,
-        res.status,
-      );
-    }
     html = await res.text();
   } catch (err: any) {
     if (err instanceof RelayError) throw err;
     throw new RelayError(
-      "UPSTREAM_ERROR",
+      "VIDEO_UNAVAILABLE",
       `Failed to fetch acefile player page: ${err.message}`,
-      502,
+      410,
     );
   }
 
@@ -95,9 +87,9 @@ export async function resolveAcefile(
     );
     if (!localRes.ok) {
       throw new RelayError(
-        "UPSTREAM_ERROR",
+        "VIDEO_UNAVAILABLE",
         `Acefile local endpoint failed with status ${localRes.status}`,
-        502,
+        410,
         localRes.status,
       );
     }
@@ -105,9 +97,9 @@ export async function resolveAcefile(
   } catch (err: any) {
     if (err instanceof RelayError) throw err;
     throw new RelayError(
-      "UPSTREAM_ERROR",
+      "VIDEO_UNAVAILABLE",
       `Failed to fetch acefile local metadata: ${err.message}`,
-      502,
+      410,
     );
   }
 
@@ -120,6 +112,7 @@ export async function resolveAcefile(
     );
   }
 
+  let directUrl: string;
   try {
     const rawJson = Buffer.from(sourceMatch[1], "base64").toString("utf-8");
     const sources = JSON.parse(rawJson) as Array<{ file: string; label?: string; type?: string }>;
@@ -128,18 +121,7 @@ export async function resolveAcefile(
     }
 
     const file = sources[0].file;
-    const directUrl = file.startsWith("http") ? file : `https://acefile.co${file}`;
-
-    return {
-      directUrl,
-      headers: {
-        "User-Agent": DEFAULT_UA,
-        Referer: "https://acefile.co/",
-      },
-      // acefile service URLs are stable per file; 1 hour avoids repeated
-      // player-page + local-endpoint fetches for the same id.
-      ttlMs: 60 * 60 * 1000,
-    };
+    directUrl = file.startsWith("http") ? file : `https://acefile.co${file}`;
   } catch (err: any) {
     throw new RelayError(
       "VIDEO_UNAVAILABLE",
@@ -147,4 +129,42 @@ export async function resolveAcefile(
       410,
     );
   }
+
+  // Probe check: verify stream is playable before returning
+  try {
+    const probeSignal = AbortSignal.timeout(Math.min(timeoutMs, 5000));
+    const probeRes = await fetch(directUrl, {
+      method: "GET",
+      headers: {
+        "User-Agent": DEFAULT_UA,
+        Referer: "https://acefile.co/",
+        Range: "bytes=0-1",
+      },
+      signal: probeSignal,
+    });
+    if (probeRes.status !== 200 && probeRes.status !== 206) {
+      throw new RelayError(
+        "VIDEO_UNAVAILABLE",
+        `Acefile stream probe returned ${probeRes.status}`,
+        410,
+        probeRes.status,
+      );
+    }
+  } catch (err: any) {
+    if (err instanceof RelayError) throw err;
+    throw new RelayError(
+      "VIDEO_UNAVAILABLE",
+      `Acefile stream probe failed: ${err.message}`,
+      410,
+    );
+  }
+
+  return {
+    directUrl,
+    headers: {
+      "User-Agent": DEFAULT_UA,
+      Referer: "https://acefile.co/",
+    },
+    ttlMs: 2 * 60 * 60 * 1000,
+  };
 }

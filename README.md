@@ -6,12 +6,53 @@ Lightweight video stream relay and resolver service designed to stream media fro
 
 - **Direct Stream Relay**: Pipes upstream bytes with backpressure and auto-destruction on client disconnect.
 - **Range Support**: Forwards HTTP `Range` headers to support seeking (`206 Partial Content`).
+- **Batch Hybrid Resolver**: Resolves multiple sources in parallel per quality with sequential fallback intra-quality, returning signed `/v1/stream` URLs.
 - **Token Authorization**: Verifies HMAC-SHA256 signed URLs offline with timing-safe checks.
-- **In-Memory Cache & Single-Flight**: LRU-capped (1000 entries) cache with per-provider TTL (acefile 1h, blogger 20m), single-flight dedup, negative caching for dead videos, and stale-while-error fallback.
+- **Persistent SQLite Cache**: Zero-dependency SQLite (`node:sqlite`) cache (default 2 hours TTL), single-flight dedup, negative caching for dead videos, and stale-while-error fallback.
 - **Guardrails**: Global and per-IP concurrency limits, sliding read-idle timeouts, and token-bucket rate limits.
 - **Metrics**: Runtime stats endpoint for external dashboards.
 
 ## API Specification
+
+### `POST /internal/resolve` (or `POST /v1/resolve`)
+
+Batch resolver for Akira backend. Accepts candidate sources grouped by quality, runs hybrid resolution (parallel across qualities, sequential fallback within each quality), and returns signed `/v1/stream` URLs.
+
+- **Auth**: Send `X-Relay-Key: <key>` header or `Authorization: Bearer <key>` (checked when `INTERNAL_RELAY_KEY` is configured).
+
+#### Request Body
+```json
+{
+  "sources": [
+    { "site": "acefile", "quality": "2160p", "url": "https://acefile.co/f/111" },
+    { "site": "blogger", "quality": "2160p", "url": "https://www.blogger.com/video.g?token=aaa" },
+    { "site": "acefile", "quality": "1080p", "url": "https://acefile.co/f/222" },
+    { "site": "blogger", "quality": "720p",  "url": "https://www.blogger.com/video.g?token=bbb" }
+  ]
+}
+```
+
+#### Response (200 OK)
+```json
+{
+  "streams": [
+    {
+      "quality": "2160p",
+      "url": "/v1/stream?u=...&e=...&s=..."
+    },
+    {
+      "quality": "1080p",
+      "url": "/v1/stream?u=...&e=...&s=..."
+    },
+    {
+      "quality": "720p",
+      "url": "/v1/stream?u=...&e=...&s=..."
+    }
+  ]
+}
+```
+
+Qualities where all candidates fail are automatically excluded from the output.
 
 ### `GET /v1/stream`
 
@@ -105,10 +146,11 @@ Copy `.env.example` to `.env`. Key variables:
 | `RELAY_TUNNEL_TOKEN` | — | Cloudflare Tunnel token for the sidecar |
 | `ALLOWLIST_HOSTS` | `acefile.co,blogger.com,...` | Comma-separated permitted target hosts |
 | `MAX_CONCURRENT_STREAMS` | `150` | Global concurrent stream cap |
-| `RESOLVE_CACHE_TTL_MS` | `900000` | Default resolve cache TTL (provider TTLs override) |
+| `RESOLVE_CACHE_TTL_MS` | `7200000` | SQLite resolve cache TTL (default: 2 hours) |
+| `SQLITE_DB_PATH` | `./data/relay.db` | SQLite database file location |
 | `IDLE_TIMEOUT_MS` | `20000` | Sliding read-idle timeout; stream destroyed if exceeded |
 | `RESOLVE_TIMEOUT_MS` | `10000` | Upstream resolve/connect timeout before first byte |
-| `INTERNAL_RELAY_KEY` | — | If set, `/internal/stats` requires `X-Relay-Key` header |
+| `INTERNAL_RELAY_KEY` | — | If set, `/internal/resolve` and `/internal/stats` require `X-Relay-Key` header |
 
 ## Project Structure
 
@@ -117,16 +159,16 @@ src/
 ├── server.ts           # Fastify bootstrap & config
 ├── routes/
 │   ├── stream.ts       # GET /v1/stream
-│   └── internal.ts     # /internal/health + /internal/stats
+│   └── internal.ts     # /internal/resolve, /internal/health, /internal/stats
 ├── core/
 │   ├── relay.ts        # pipeline, Range, idle timeout, abort
 │   ├── token.ts        # HMAC sign/verify (timing-safe)
 │   └── limit.ts        # concurrency + per-IP rate limit
 ├── resolve/
 │   ├── index.ts        # allowlist, cache orchestration, single-flight
-│   ├── acefile.ts      # acefile player extractor
-│   ├── blogger.ts      # blogger batchexecute extractor
-│   ├── cache.ts        # LRU + negative + stale cache
+│   ├── acefile.ts      # acefile player extractor & probe
+│   ├── blogger.ts      # blogger batchexecute extractor, quality matching & probe
+│   ├── cache.ts        # SQLite persistent cache + single-flight
 │   └── types.ts
 └── shared/
     ├── errors.ts       # error codes → JSON response

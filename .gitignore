@@ -3,6 +3,7 @@ node_modules/
 
 # Output
 dist/
+data/
 
 # Environment files
 .env

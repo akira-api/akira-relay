@@ -20,11 +20,13 @@
   "license": "MIT",
   "dependencies": {
     "@fastify/cors": "^11.3.0",
+    "better-sqlite3": "^13.0.3",
     "dotenv": "^18.0.5",
     "fastify": "^5.12.5",
     "undici": "^8.11.2"
   },
   "devDependencies": {
+    "@types/better-sqlite3": "^9.6.0",
     "@types/node": "^26.6.4",
     "tsx": "^4.23.15",
     "typescript": "^7.0.2",

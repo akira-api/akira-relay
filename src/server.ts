@@ -74,14 +74,17 @@ export async function createServer(
   const metrics = new Metrics();
 
   if (process.env.NODE_ENV !== "test") {
+    const isSilentPath = (url: string) =>
+      url === "/internal/health" || url === "/internal/stats";
+
     app.addHook("onRequest", async (req) => {
-      if (req.url === "/internal/health") return;
+      if (isSilentPath(req.url)) return;
       (req.raw as any).__startTime = Date.now();
       logger.request(req.method, req.url, getClientIp(req));
     });
 
     app.addHook("onResponse", async (req, reply) => {
-      if (req.url === "/internal/health") return;
+      if (isSilentPath(req.url)) return;
       const startTime = (req.raw as any).__startTime || Date.now();
       const duration = Date.now() - startTime;
       logger.response(req.method, req.url, reply.statusCode, duration);

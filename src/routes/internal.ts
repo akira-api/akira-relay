@@ -32,10 +32,30 @@ export interface ResolveRequestBody {
   sources?: SourceCandidate[];
 }
 
+export function normalizeResolution(raw?: string): string {
+  if (!raw || typeof raw !== "string") return "default";
+  const clean = raw.toLowerCase().trim();
+  if (!clean || clean === "unknown" || clean === "default") return "default";
+  if (clean === "4k" || clean === "2160" || clean === "2160p") return "2160p";
+  if (clean === "2k" || clean === "1440" || clean === "1440p") return "1440p";
+  if (clean === "fhd" || clean === "1080" || clean === "1080p") return "1080p";
+  if (clean === "hd" || clean === "720" || clean === "720p") return "720p";
+  if (clean === "sd" || clean === "480" || clean === "480p") return "480p";
+  if (clean === "360" || clean === "360p") return "360p";
+  if (clean === "240" || clean === "240p") return "240p";
+  if (clean === "144" || clean === "144p") return "144p";
+  const match = clean.match(/^(\d+)p?$/);
+  if (match) return `${match[1]}p`;
+  return clean;
+}
+
 export function parseResolutionScore(resolution: string): number {
   const clean = resolution.toLowerCase().trim();
-  if (clean === "4k" || clean === "2160p") return 2160;
-  if (clean === "2k" || clean === "1440p") return 1440;
+  if (clean === "4k" || clean === "2160" || clean === "2160p") return 2160;
+  if (clean === "2k" || clean === "1440" || clean === "1440p") return 1440;
+  if (clean === "fhd" || clean === "1080" || clean === "1080p") return 1080;
+  if (clean === "hd" || clean === "720" || clean === "720p") return 720;
+  if (clean === "sd" || clean === "480" || clean === "480p") return 480;
   const match = clean.match(/(\d+)/);
   return match ? Number.parseInt(match[1], 10) : 0;
 }
@@ -131,16 +151,14 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
       });
     }
 
-    // Group candidates by resolution
+    // Group candidates by canonical resolution
     const groups = new Map<string, SourceCandidate[]>();
     for (const item of sources) {
       if (!item || typeof item.url !== "string") {
         continue;
       }
       const rawRes = item.resolution || item.quality;
-      if (typeof rawRes !== "string") continue;
-      const resName = rawRes.trim();
-      if (!resName) continue;
+      const resName = normalizeResolution(rawRes);
       const list = groups.get(resName) ?? [];
       list.push(item);
       groups.set(resName, list);

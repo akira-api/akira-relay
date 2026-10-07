@@ -1,3 +1,4 @@
+import { normalizeResolution } from "../routes/internal.js";
 import { RelayError } from "../shared/errors.js";
 import { detectProvider, type Metrics } from "../shared/metrics.js";
 import { normalizeAcefileUrl, resolveAcefile } from "./acefile.js";
@@ -90,15 +91,19 @@ export class StreamResolver {
       );
     }
 
-    const effectiveQuality =
+    const rawQuality =
       targetQuality ||
       (parsed.hash ? parsed.hash.replace(/^#/, "") : undefined);
+    const effectiveQuality = rawQuality
+      ? normalizeResolution(rawQuality)
+      : undefined;
 
     const baseUrl = targetUrl.split("#")[0];
     const normalizedBase = normalizeTargetUrl(baseUrl);
-    const key = effectiveQuality
-      ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
-      : normalizedBase;
+    const key =
+      effectiveQuality && effectiveQuality !== "default"
+        ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
+        : normalizedBase;
 
     const lookup = this.cache.lookup(key);
 
@@ -188,7 +193,7 @@ export class StreamResolver {
       if (bloggerRes.allStreams && bloggerRes.allStreams.length > 0) {
         const baseKey = normalizeTargetUrl(targetUrl.split("#")[0]);
         for (const s of bloggerRes.allStreams) {
-          const qualKey = `${baseKey}#${s.quality.toLowerCase()}`;
+          const qualKey = `${baseKey}#${normalizeResolution(s.quality)}`;
           if (qualKey !== key) {
             this.cache.setStream(qualKey, {
               directUrl: s.directUrl,
@@ -224,14 +229,18 @@ export class StreamResolver {
   evict(targetUrl: string, quality?: string): void {
     try {
       const parsed = new URL(targetUrl);
-      const effectiveQuality =
+      const rawQuality =
         quality ||
         (parsed.hash ? parsed.hash.replace(/^#/, "") : undefined);
+      const effectiveQuality = rawQuality
+        ? normalizeResolution(rawQuality)
+        : undefined;
       const baseUrl = targetUrl.split("#")[0];
       const normalizedBase = normalizeTargetUrl(baseUrl);
-      const key = effectiveQuality
-        ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
-        : normalizedBase;
+      const key =
+        effectiveQuality && effectiveQuality !== "default"
+          ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
+          : normalizedBase;
       this.cache.evictKey(key);
     } catch {
       // Ignore URL parsing errors

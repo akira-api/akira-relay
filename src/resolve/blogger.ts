@@ -1,4 +1,5 @@
 import { fetch } from "undici";
+import { normalizeResolution, parseResolutionScore } from "../routes/internal.js";
 import { RelayError } from "../shared/errors.js";
 import type { ResolvedStream } from "./types.js";
 
@@ -89,8 +90,12 @@ export async function resolveBlogger(
     );
   }
 
-  const sid = page.split('FdrFJe":"')[1]?.split('"')[0];
-  const bl = page.split('cfb2h":"')[1]?.split('"')[0];
+  const sid =
+    page.match(/["']FdrFJe["']\s*:\s*["']([^"']+)["']/)?.[1] ||
+    page.split('FdrFJe":"')[1]?.split('"')[0];
+  const bl =
+    page.match(/["']cfb2h["']\s*:\s*["']([^"']+)["']/)?.[1] ||
+    page.split('cfb2h":"')[1]?.split('"')[0];
   if (!sid || !bl) {
     throw new RelayError(
       "VIDEO_UNAVAILABLE",
@@ -175,25 +180,34 @@ export async function resolveBlogger(
 
   streams.sort((a, b) => b.score - a.score);
 
-  // If a specific target quality was requested, find matching stream
+  // If a specific target quality was requested, find matching stream or nearest fallback
   let selectedStream: BloggerStreamInfo | undefined;
-  if (targetQuality) {
-    const cleanTarget = targetQuality.toLowerCase().trim();
+  if (targetQuality && targetQuality.toLowerCase() !== "default") {
+    const cleanTarget = normalizeResolution(targetQuality);
+    const targetScore = parseResolutionScore(cleanTarget);
+
+    // 1. Exact match
     selectedStream = streams.find(
       (s) =>
         s.quality.toLowerCase() === cleanTarget ||
-        s.quality.toLowerCase() === `${cleanTarget}p` ||
+        normalizeResolution(s.quality) === cleanTarget ||
         `${s.score}p` === cleanTarget,
     );
 
-    if (!selectedStream) {
-      throw new RelayError(
-        "VIDEO_UNAVAILABLE",
-        `Quality '${targetQuality}' not available in this blogger video`,
-        410,
-      );
+    // 2. Nearest quality fallback (e.g. 480p -> 360p or 720p)
+    if (!selectedStream && targetScore > 0) {
+      const sortedByDiff = [...streams].sort((a, b) => {
+        const diffA = Math.abs(a.score - targetScore);
+        const diffB = Math.abs(b.score - targetScore);
+        if (diffA !== diffB) return diffA - diffB;
+        return a.score - b.score;
+      });
+      selectedStream = sortedByDiff[0];
     }
-  } else {
+  }
+
+  // Fallback to highest quality available if no match or default requested
+  if (!selectedStream) {
     selectedStream = streams[0];
   }
 

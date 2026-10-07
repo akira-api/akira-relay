@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../src/server.js";
-import { parseQualityScore } from "../src/routes/internal.js";
+import { normalizeResolution, parseQualityScore } from "../src/routes/internal.js";
 import { verifyStreamToken } from "../src/core/token.js";
 import { logger } from "../src/shared/logger.js";
 
@@ -29,6 +29,21 @@ describe("Batch Resolve Endpoint", () => {
     expect(parseQualityScore("720p")).toBe(720);
     expect(parseQualityScore("480p")).toBe(480);
     expect(parseQualityScore("unknown")).toBe(0);
+  });
+
+  it("normalizes resolution strings canonically", () => {
+    expect(normalizeResolution("1080")).toBe("1080p");
+    expect(normalizeResolution("1080p")).toBe("1080p");
+    expect(normalizeResolution("FHD")).toBe("1080p");
+    expect(normalizeResolution("720")).toBe("720p");
+    expect(normalizeResolution("720P")).toBe("720p");
+    expect(normalizeResolution("HD")).toBe("720p");
+    expect(normalizeResolution("480")).toBe("480p");
+    expect(normalizeResolution("SD")).toBe("480p");
+    expect(normalizeResolution("4k")).toBe("2160p");
+    expect(normalizeResolution("unknown")).toBe("default");
+    expect(normalizeResolution("")).toBe("default");
+    expect(normalizeResolution(undefined)).toBe("default");
   });
 
   it("validates request body for POST /internal/resolve", async () => {
@@ -254,6 +269,40 @@ describe("Batch Resolve Endpoint", () => {
     expect(infoSpy).toHaveBeenCalledWith(
       "Resolve OK: 2 stream(s) [acefile 1, blogger 1 | 720p, 480p]",
     );
+
+    await app.close();
+  });
+
+  it("groups disparate resolution notations (e.g. 720 and 720p) into same fallback group", async () => {
+    const { app, resolver } = await createServer({ secret });
+
+    const resolveSpy = vi.spyOn(resolver, "resolve").mockImplementation(async (targetUrl: string) => {
+      if (targetUrl.includes("fail-720")) {
+        throw new Error("404");
+      }
+      return {
+        directUrl: "https://example.com/ok-720.mp4",
+        ttlMs: 7200000,
+      };
+    });
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/resolve",
+      payload: {
+        sources: [
+          // "720" fails, should fall back to "720p" in the same resolution group
+          { server: "acefile", resolution: "720", url: "https://acefile.co/f/fail-720" },
+          { server: "blogger", resolution: "720p", url: "https://blogger.com/video.g?token=ok-720" },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.streams).toHaveLength(1);
+    expect(body.streams[0].resolution).toBe("720p");
+    expect(body.streams[0].server).toBe("blogger");
 
     await app.close();
   });

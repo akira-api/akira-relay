@@ -1,5 +1,5 @@
 import { RelayError } from "../shared/errors.js";
-import type { Metrics } from "../shared/metrics.js";
+import { detectProvider, type Metrics } from "../shared/metrics.js";
 import { normalizeAcefileUrl, resolveAcefile } from "./acefile.js";
 import { normalizeBloggerUrl, resolveBlogger } from "./blogger.js";
 import { ResolveCache } from "./cache.js";
@@ -128,17 +128,19 @@ export class StreamResolver {
       this.metrics.cache.misses++;
     }
 
+    const provider = detectProvider(parsed.hostname);
+
     try {
       const stream = await this.cache.begin(key, () =>
         this.fetchDirect(baseUrl, key, parsed.hostname, effectiveQuality),
       );
       if (this.metrics) {
-        this.metrics.resolve.ok++;
+        this.metrics.recordResolve(provider, effectiveQuality, true);
       }
       return stream;
     } catch (err: any) {
       if (this.metrics) {
-        this.metrics.resolve.failed++;
+        this.metrics.recordResolve(provider, effectiveQuality, false);
       }
 
       // Negative cache: trust "video unavailable" verdicts for a short window.

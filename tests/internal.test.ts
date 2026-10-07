@@ -2,6 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { createServer } from "../src/server.js";
 import { parseQualityScore } from "../src/routes/internal.js";
 import { verifyStreamToken } from "../src/core/token.js";
+import { logger } from "../src/shared/logger.js";
 
 describe("Batch Resolve Endpoint", () => {
   const secret = "test-secret-key-at-least-32-chars-long";
@@ -210,6 +211,49 @@ describe("Batch Resolve Endpoint", () => {
     expect(res.statusCode).toBe(200);
     const body = JSON.parse(res.body);
     expect(body).toEqual({ streams: [] });
+
+    await app.close();
+  });
+
+  it("aggregates candidate failures and resolved streams in logs", async () => {
+    const { app, resolver } = await createServer({ secret });
+    const warnSpy = vi.spyOn(logger, "warn").mockImplementation(() => {});
+    const infoSpy = vi.spyOn(logger, "info").mockImplementation(() => {});
+    const debugSpy = vi.spyOn(logger, "debug").mockImplementation(() => {});
+
+    vi.spyOn(resolver, "resolve").mockImplementation(async (targetUrl: string) => {
+      if (targetUrl.includes("broken")) {
+        throw new Error("404 Not Found");
+      }
+      return {
+        directUrl: "https://example.com/video.mp4",
+        ttlMs: 7200000,
+      };
+    });
+
+    await app.inject({
+      method: "POST",
+      url: "/internal/resolve",
+      payload: {
+        sources: [
+          { server: "acefile", resolution: "1080p", url: "https://acefile.co/f/broken-1" },
+          { server: "acefile", resolution: "1080p", url: "https://acefile.co/f/broken-2" },
+          { server: "acefile", resolution: "720p", url: "https://acefile.co/f/good-720" },
+          { server: "blogger", resolution: "480p", url: "https://blogger.com/video.g?token=good-480" },
+        ],
+      },
+    });
+
+    // Detailed failures went to debug
+    expect(debugSpy).toHaveBeenCalledTimes(2);
+
+    // Single aggregated warn for fallback failures
+    expect(warnSpy).toHaveBeenCalledWith("Candidate fallback: 2 failed [acefile: 2]");
+
+    // Summary info for resolved streams
+    expect(infoSpy).toHaveBeenCalledWith(
+      "Resolve OK: 2 stream(s) [acefile 1, blogger 1 | 720p, 480p]",
+    );
 
     await app.close();
   });

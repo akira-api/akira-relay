@@ -43,6 +43,7 @@ export interface RelayStreamOptions {
   reply: FastifyReply;
   stream: ResolvedStream;
   metrics?: Metrics;
+  provider?: string;
   idleTimeoutMs?: number;
   connectTimeoutMs?: number;
 }
@@ -53,6 +54,7 @@ export async function pipeVideoToClient(options: RelayStreamOptions): Promise<vo
     reply,
     stream,
     metrics,
+    provider,
     idleTimeoutMs = 20000,
     connectTimeoutMs = 10000,
   } = options;
@@ -252,7 +254,7 @@ export async function pipeVideoToClient(options: RelayStreamOptions): Promise<vo
       transform(chunk, _encoding, callback) {
         firstByteSent = true;
         if (metrics) {
-          metrics.streams.bytesStreamed += chunk.length;
+          metrics.recordStreamBytes(chunk.length, provider);
         }
         callback(null, chunk);
       },

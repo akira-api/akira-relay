@@ -5,7 +5,11 @@ import { verifyStreamToken } from "../core/token.js";
 import type { StreamResolver } from "../resolve/index.js";
 import { RelayError } from "../shared/errors.js";
 import { logger } from "../shared/logger.js";
-import type { Metrics } from "../shared/metrics.js";
+import {
+  detectProvider,
+  detectResolution,
+  type Metrics,
+} from "../shared/metrics.js";
 
 export interface StreamRouteOptions {
   secret: string;
@@ -49,6 +53,8 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
       const { targetUrl } = verifyStreamToken(u, e, s, opts.secret);
 
       const clientIp = getClientIp(req);
+      const provider = detectProvider(targetUrl);
+      const resolution = detectResolution(targetUrl);
 
       // 2. Concurrency limit acquisition
       const releaseSlot = opts.limits.acquireStreamSlot(clientIp);
@@ -58,11 +64,7 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
           slotReleased = true;
           releaseSlot();
           if (opts.metrics) {
-            opts.metrics.streams.active = Math.max(
-              0,
-              opts.metrics.streams.active - 1,
-            );
-            opts.metrics.streams.finished++;
+            opts.metrics.recordStreamEnd(provider);
           }
         }
       };
@@ -70,8 +72,7 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
       reply.raw.on("close", safeRelease);
 
       if (opts.metrics) {
-        opts.metrics.streams.active++;
-        opts.metrics.streams.started++;
+        opts.metrics.recordStreamStart(provider, resolution);
       }
 
       // 3. Resolve target URL (Rate limit checked only on cache miss)
@@ -85,6 +86,7 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
         reply,
         stream,
         metrics: opts.metrics,
+        provider,
         idleTimeoutMs: opts.idleTimeoutMs,
         connectTimeoutMs: opts.connectTimeoutMs,
       });
@@ -93,8 +95,10 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
         safeRelease();
       }
       if (opts.metrics) {
+        const provider = req.query?.u ? detectProvider(req.query.u) : undefined;
         opts.metrics.countError(
           err instanceof RelayError ? err.code : "UPSTREAM_ERROR",
+          provider,
         );
       }
       logger.warn(`Stream request failed: ${err.message || err}`);

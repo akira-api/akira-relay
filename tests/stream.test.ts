@@ -107,6 +107,22 @@ describe("Fastify Stream API", () => {
       expect(body.streams).toHaveProperty("bytesStreamed");
       expect(body.limits).toHaveProperty("rateLimitRejections");
       expect(body).toHaveProperty("errorsByCode");
+      expect(body).toHaveProperty("errorsByProvider");
+
+      // Detailed bandwidth & throughput metrics
+      expect(body.bandwidth).toHaveProperty("currentSpeedMbps");
+      expect(body.bandwidth).toHaveProperty("totalStreamedMB");
+      expect(body.bandwidth).toHaveProperty("totalStreamedGB");
+
+      // Cache hit ratio
+      expect(body.cache).toHaveProperty("hitRatioPercent");
+
+      // Per-provider & per-resolution breakdowns
+      expect(body.resolve).toHaveProperty("byProvider");
+      expect(body.resolve).toHaveProperty("byResolution");
+      expect(body.streams).toHaveProperty("byProvider");
+      expect(body.streams).toHaveProperty("byResolution");
+
       await app.close();
     } finally {
       if (prevKey !== undefined) {
@@ -136,5 +152,44 @@ describe("Fastify Stream API", () => {
     } finally {
       delete process.env.INTERNAL_RELAY_KEY;
     }
+  });
+
+  it("accurately records per-provider, resolution, and bandwidth metrics", async () => {
+    const { app, metrics } = await createServer({ secret });
+
+    // Simulate resolve
+    metrics.recordResolve("acefile", "1080p", true);
+    metrics.recordResolve("acefile", "720p", false);
+    metrics.recordResolve("blogger", "480p", true);
+
+    // Simulate streaming
+    metrics.recordStreamStart("acefile", "1080p");
+    metrics.recordStreamBytes(1048576 * 5, "acefile"); // 5 MB
+    metrics.recordStreamEnd("acefile");
+
+    metrics.countError("404", "acefile");
+
+    const res = await app.inject({
+      method: "GET",
+      url: "/internal/stats",
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+
+    expect(body.resolve.byProvider.acefile).toEqual({ total: 2, ok: 1, failed: 1 });
+    expect(body.resolve.byProvider.blogger).toEqual({ total: 1, ok: 1, failed: 0 });
+    expect(body.resolve.byResolution["1080p"]).toBe(1);
+    expect(body.resolve.byResolution["480p"]).toBe(1);
+
+    expect(body.streams.byProvider.acefile.bytesStreamedMB).toBe(5);
+    expect(body.streams.byResolution["1080p"]).toBe(1);
+
+    expect(body.bandwidth.totalStreamedMB).toBe(5);
+    expect(body.bandwidth.currentSpeedMbps).toBeGreaterThan(0);
+
+    expect(body.errorsByProvider.acefile["404"]).toBe(1);
+
+    await app.close();
   });
 });

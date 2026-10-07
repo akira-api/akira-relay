@@ -2,8 +2,9 @@ import type { FastifyPluginAsync, FastifyReply, FastifyRequest } from "fastify";
 import type { LimitManager } from "../core/limit.js";
 import { signStreamUrl } from "../core/token.js";
 import type { StreamResolver } from "../resolve/index.js";
+import { RelayError } from "../shared/errors.js";
 import { logger } from "../shared/logger.js";
-import type { Metrics } from "../shared/metrics.js";
+import { detectProvider, type Metrics } from "../shared/metrics.js";
 
 export interface InternalRouteOptions {
   resolver: StreamResolver;
@@ -42,14 +43,7 @@ export function parseResolutionScore(resolution: string): number {
 export const parseQualityScore = parseResolutionScore;
 
 export function detectServer(url: string): string {
-  try {
-    const host = new URL(url).hostname.toLowerCase();
-    if (host.includes("acefile.co")) return "acefile";
-    if (host.includes("blogger.com")) return "blogger";
-    return host;
-  } catch {
-    return "unknown";
-  }
+  return detectProvider(url);
 }
 
 function checkAuth(
@@ -104,7 +98,8 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
         rssMB: Math.round(mem.rss / 1048576),
         heapUsedMB: Math.round(mem.heapUsed / 1048576),
       },
-      cache: metrics.cache,
+      bandwidth: metrics.getBandwidthStats(),
+      cache: metrics.getCacheStats(),
       resolve: metrics.resolve,
       streams: metrics.streams,
       limits: {
@@ -112,6 +107,7 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
         ...metrics.limits,
       },
       errorsByCode: metrics.errorsByCode,
+      errorsByProvider: metrics.errorsByProvider,
     };
   });
 
@@ -156,6 +152,8 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
     );
 
     // Hybrid resolve: parallel across resolutions, sequential fallback within each resolution
+    const failedCandidates: Array<{ server: string; resolution: string; url: string; error: string }> = [];
+
     const results = await Promise.all(
       sortedResolutions.map(async (resolution) => {
         const candidates = groups.get(resolution)!;
@@ -172,10 +170,20 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
               url: path,
             };
           } catch (err: any) {
-            const sName = candidate.server || candidate.site || "unknown";
-            logger.warn(
+            const sName = candidate.server || candidate.site || detectServer(candidate.url);
+            logger.debug(
               `Candidate failed for ${resolution} [${sName}] (${candidate.url}): ${err?.message || err}`,
             );
+            if (metrics) {
+              const code = err instanceof RelayError ? err.code : "UPSTREAM_ERROR";
+              metrics.countError(code, sName);
+            }
+            failedCandidates.push({
+              server: sName,
+              resolution,
+              url: candidate.url,
+              error: err?.message || String(err),
+            });
             continue;
           }
         }
@@ -186,6 +194,37 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
     const streams = results.filter(
       (r): r is ResolvedStreamItem => r !== null,
     );
+
+    if (failedCandidates.length > 0) {
+      const failedCounts: Record<string, number> = {};
+      for (const fc of failedCandidates) {
+        failedCounts[fc.server] = (failedCounts[fc.server] || 0) + 1;
+      }
+      const breakdown = Object.entries(failedCounts)
+        .map(([srv, count]) => `${srv}: ${count}`)
+        .join(", ");
+      logger.warn(
+        `Candidate fallback: ${failedCandidates.length} failed [${breakdown}]`,
+      );
+    }
+
+    if (streams.length > 0) {
+      const serverCounts: Record<string, number> = {};
+      for (const item of streams) {
+        serverCounts[item.server] = (serverCounts[item.server] || 0) + 1;
+      }
+      const serverSummary = Object.entries(serverCounts)
+        .map(([srv, count]) => `${srv} ${count}`)
+        .join(", ");
+      const resolutionSummary = streams.map((s) => s.resolution).join(", ");
+      logger.info(
+        `Resolve OK: ${streams.length} stream(s) [${serverSummary} | ${resolutionSummary}]`,
+      );
+    } else {
+      logger.warn(
+        `Resolve failed: 0 stream(s) resolved across ${sources.length} candidate(s)`,
+      );
+    }
 
     return { streams };
   };

@@ -5,7 +5,7 @@ import { signStreamUrl } from "../src/core/token.js";
 const DEFAULT_SECRET =
   process.env.RELAY_SECRET || "development-secret-key-32-chars-long";
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
-const TARGET_URL = process.argv[2] || "https://acefile.co/f/87122050";
+const TARGET_URL = process.argv[2] || "https://acefile.co/f/112286640";
 const INTERNAL_KEY = process.env.INTERNAL_RELAY_KEY;
 
 async function main() {

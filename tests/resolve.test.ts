@@ -2,6 +2,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
+import { unpackPacker } from "../src/resolve/acefile.js";
 import { ResolveCache } from "../src/resolve/cache.js";
 import {
   isHostAllowed,
@@ -159,5 +160,25 @@ describe("Resolve & Cache", () => {
     } finally {
       fs.rmSync(tmpDir, { recursive: true, force: true });
     }
+  });
+
+  it("evicts cached keys explicitly on failure", () => {
+    const cache = new ResolveCache(7200000);
+    cache.setStream("test-evict-key", {
+      directUrl: "https://cdn.example.com/stream.mp4",
+      ttlMs: 7200000,
+    });
+    expect(cache.lookup("test-evict-key").state).toBe("fresh");
+
+    cache.evictKey("test-evict-key");
+    expect(cache.lookup("test-evict-key").state).toBe("miss");
+    cache.destroy();
+  });
+
+  it("unpacks Dean Edwards packer script format correctly", () => {
+    const sampleHtml = `<script>eval(function(p,a,c,k,e,d){e=function(c){return c};if(!''.replace(/^/,String)){while(c--){d[c]=k[c]||c}k=[function(e){return d[e]}];e=function(){return'\\w+'};c=1};while(c--){if(k[c]){p=p.replace(new RegExp('\\b'+e(c)+'\\b','g'),k[c])}}return p}('var nfck="458cbc2ff92bd124640d5f01989e6080f5f0fae8";var DUAR=[{"id":"112287004"}];',2,2,'nfck|DUAR'.split('|'),0,{}))</script>`;
+    const unpacked = unpackPacker(sampleHtml);
+    expect(unpacked).toContain('var nfck="458cbc2ff92bd124640d5f01989e6080f5f0fae8"');
+    expect(unpacked).toContain('var DUAR=[{"id":"112287004"}]');
   });
 });

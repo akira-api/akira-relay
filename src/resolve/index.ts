@@ -221,6 +221,23 @@ export class StreamResolver {
     return this.cache.size;
   }
 
+  evict(targetUrl: string, quality?: string): void {
+    try {
+      const parsed = new URL(targetUrl);
+      const effectiveQuality =
+        quality ||
+        (parsed.hash ? parsed.hash.replace(/^#/, "") : undefined);
+      const baseUrl = targetUrl.split("#")[0];
+      const normalizedBase = normalizeTargetUrl(baseUrl);
+      const key = effectiveQuality
+        ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
+        : normalizedBase;
+      this.cache.evictKey(key);
+    } catch {
+      // Ignore URL parsing errors
+    }
+  }
+
   destroy(): void {
     this.cache.destroy();
   }

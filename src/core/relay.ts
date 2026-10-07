@@ -111,7 +111,14 @@ export async function pipeVideoToClient(options: RelayStreamOptions): Promise<vo
         const nextLoc = Array.isArray(upstreamRes.headers.location)
           ? upstreamRes.headers.location[0]
           : upstreamRes.headers.location;
-        currentUrl = new URL(nextLoc, currentUrl).toString();
+        const nextUrl = new URL(nextLoc, currentUrl);
+        const prevHost = new URL(currentUrl).hostname.toLowerCase();
+        if (nextUrl.hostname.toLowerCase() !== prevHost) {
+          // Drop Referer on cross-domain redirect (e.g. acefile.co -> googleapis.com)
+          delete upstreamHeaders.referer;
+          delete upstreamHeaders.Referer;
+        }
+        currentUrl = nextUrl.toString();
         await upstreamRes.body.dump();
         if (i === maxRedirects) {
           throw new RelayError(
@@ -156,12 +163,12 @@ export async function pipeVideoToClient(options: RelayStreamOptions): Promise<vo
   const { statusCode, headers: rawHeaders, body: upstreamBody } = upstreamRes;
 
   // Handle upstream error status codes before headers are sent
-  if (statusCode === 404 || statusCode === 410) {
+  if (statusCode === 404 || statusCode === 410 || statusCode === 403) {
     upstreamBody.destroy();
     reply.raw.off("close", onClientClose);
     throw new RelayError(
       "VIDEO_UNAVAILABLE",
-      `Upstream video resource not found (status ${statusCode})`,
+      `Upstream video resource not available (status ${statusCode})`,
       410,
       statusCode,
     );

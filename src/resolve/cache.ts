@@ -248,6 +248,12 @@ export class ResolveCache {
     );
   }
 
+  /** Explicitly delete a stream key from cache (used on upstream 403/410 errors). */
+  evictKey(key: string): void {
+    this.stmtDeleteStream.run(key);
+    this.stmtDeleteNegative.run(key);
+  }
+
   /**
    * Single-flight: concurrent callers for the same key share one resolver
    * promise. Failures are NOT cached here — callers decide (negative vs stale).

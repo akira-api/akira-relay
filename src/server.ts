@@ -20,6 +20,7 @@ export interface ServerConfig {
   resolveCacheTtlMs?: number;
   idleTimeoutMs?: number;
   resolveTimeoutMs?: number;
+  connectTimeoutMs?: number;
   sqliteDbPath?: string;
   internalRelayKey?: string;
 }
@@ -55,6 +56,10 @@ export function loadConfigFromEnv(): ServerConfig {
     idleTimeoutMs: Number.parseInt(process.env.IDLE_TIMEOUT_MS || "20000", 10),
     resolveTimeoutMs: Number.parseInt(
       process.env.RESOLVE_TIMEOUT_MS || "10000",
+      10,
+    ),
+    connectTimeoutMs: Number.parseInt(
+      process.env.CONNECT_TIMEOUT_MS || "25000",
       10,
     ),
     sqliteDbPath: process.env.SQLITE_DB_PATH || "./data/relay.db",
@@ -154,7 +159,7 @@ export async function createServer(
     limits,
     metrics,
     idleTimeoutMs: config.idleTimeoutMs,
-    connectTimeoutMs: config.resolveTimeoutMs,
+    connectTimeoutMs: config.connectTimeoutMs ?? 25000,
   });
 
   app.addHook("onClose", async () => {

@@ -45,12 +45,14 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
     };
   }>("/v1/stream", async (req, reply) => {
     let safeRelease: (() => void) | null = null;
+    let targetUrl: string | undefined;
 
     try {
       const { u, e, s } = req.query;
 
       // 1. Verify token
-      const { targetUrl } = verifyStreamToken(u, e, s, opts.secret);
+      const verified = verifyStreamToken(u, e, s, opts.secret);
+      targetUrl = verified.targetUrl;
 
       const clientIp = getClientIp(req);
       const provider = detectProvider(targetUrl);
@@ -94,6 +96,12 @@ export const streamRoute: FastifyPluginAsync<StreamRouteOptions> = async (
       if (safeRelease) {
         safeRelease();
       }
+
+      // Auto-evict cached stream on upstream failures (403, 404, 410, timeout)
+      if (targetUrl) {
+        opts.resolver.evict(targetUrl);
+      }
+
       if (opts.metrics) {
         const provider = req.query?.u ? detectProvider(req.query.u) : undefined;
         opts.metrics.countError(

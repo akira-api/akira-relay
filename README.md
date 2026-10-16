@@ -12,6 +12,16 @@ Lightweight video stream relay and resolver service designed to stream media fro
 - **Guardrails**: Global and per-IP concurrency limits, sliding read-idle timeouts, and token-bucket rate limits.
 - **Metrics**: Runtime stats endpoint for external dashboards.
 
+## Supported Sites
+
+| Provider | URL examples | Resolutions |
+|----------|--------------|-------------|
+| Acefile | `https://acefile.co/f/<id>` | Source-dependent |
+| Blogger | `https://www.blogger.com/video.g?token=<token>` | 144p–1080p when available |
+| Mixdrop | `https://miiiixdrop.net/e/<id>` | Source-dependent |
+
+Mixdrop resolution uses the embed page's direct `wurl` source. The relay forwards the embed `Referer` and session cookie required by its CDN.
+
 ## API Specification
 
 ### `POST /internal/resolve` (or `POST /v1/resolve`)
@@ -27,7 +37,8 @@ Batch resolver for Akira backend. Accepts candidate sources grouped by resolutio
     { "server": "acefile", "resolution": "2160p", "url": "https://acefile.co/f/111" },
     { "server": "blogger", "resolution": "2160p", "url": "https://www.blogger.com/video.g?token=aaa" },
     { "server": "acefile", "resolution": "1080p", "url": "https://acefile.co/f/222" },
-    { "server": "blogger", "resolution": "720p",  "url": "https://www.blogger.com/video.g?token=bbb" }
+    { "server": "blogger", "resolution": "720p",  "url": "https://www.blogger.com/video.g?token=bbb" },
+    { "server": "mixdrop", "resolution": "720p", "url": "https://miiiixdrop.net/e/jdqe04j1a7o7kql" }
   ]
 }
 ```
@@ -50,6 +61,11 @@ Batch resolver for Akira backend. Accepts candidate sources grouped by resolutio
     {
       "resolution": "720p",
       "server": "blogger",
+      "url": "/v1/stream?u=...&e=...&s=..."
+    },
+    {
+      "resolution": "720p",
+      "server": "mixdrop",
       "url": "/v1/stream?u=...&e=...&s=..."
     }
   ]
@@ -172,6 +188,7 @@ src/
 │   ├── index.ts        # allowlist, cache orchestration, single-flight
 │   ├── acefile.ts      # acefile player extractor & probe
 │   ├── blogger.ts      # blogger batchexecute extractor, quality matching & probe
+├── mixdrop.ts      # Mixdrop packed-page extractor and session forwarding
 │   ├── cache.ts        # SQLite persistent cache + single-flight
 │   └── types.ts
 └── shared/
@@ -211,7 +228,13 @@ npm run build
 npx tsx scripts/test-stream.ts "<TARGET_URL>"
 ```
 
-Prints a signed stream URL to open in the browser.
+Starts relay server, resolves two qualities, and prints signed stream URLs. Default target is Mixdrop:
+
+```bash
+npx tsx scripts/test-stream.ts
+```
+
+Stop with `Ctrl+C`.
 
 ### Docker Deployment
 

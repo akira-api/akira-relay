@@ -5,7 +5,8 @@ import { signStreamUrl } from "../src/core/token.js";
 const DEFAULT_SECRET =
   process.env.RELAY_SECRET || "development-secret-key-32-chars-long";
 const PORT = Number.parseInt(process.env.PORT || "3000", 10);
-const TARGET_URL = process.argv[2] || "https://acefile.co/f/112286640";
+const TARGET_URL =
+  process.argv[2] || "https://miiiixdrop.net/e/jdqe04j1a7o7kql";
 const INTERNAL_KEY = process.env.INTERNAL_RELAY_KEY;
 
 async function main() {
@@ -21,7 +22,11 @@ async function main() {
   // Test batch resolve endpoint
   logger.info("Testing batch resolve via POST /internal/resolve...");
   try {
-    const server = TARGET_URL.includes("blogger.com") ? "blogger" : "acefile";
+    const server = TARGET_URL.includes("blogger.com")
+      ? "blogger"
+      : /(?:mixdrop|miiiixdrop)/i.test(new URL(TARGET_URL).hostname)
+        ? "mixdrop"
+        : "acefile";
     const res = await app.inject({
       method: "POST",
       url: "/internal/resolve",

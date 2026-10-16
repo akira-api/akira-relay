@@ -3,6 +3,7 @@ import { RelayError } from "../shared/errors.js";
 import { detectProvider, type Metrics } from "../shared/metrics.js";
 import { normalizeAcefileUrl, resolveAcefile } from "./acefile.js";
 import { normalizeBloggerUrl, resolveBlogger } from "./blogger.js";
+import { resolveMixdrop } from "./mixdrop.js";
 import { ResolveCache } from "./cache.js";
 import type { ResolvedStream } from "./types.js";
 
@@ -53,6 +54,7 @@ export class StreamResolver {
     this.allowedHosts = options.allowedHosts ?? [
       "acefile.co",
       "blogger.com",
+      "miiiixdrop.net",
       "googleusercontent.com",
       "googlevideo.com",
     ];
@@ -203,6 +205,8 @@ export class StreamResolver {
           }
         }
       }
+    } else if (host.includes("miiiixdrop.net")) {
+      stream = await resolveMixdrop(key.split("#")[0], this.resolveTimeoutMs);
     } else {
       // Direct/passthrough video stream (e.g. googlevideo or direct mp4/m3u8)
       stream = {

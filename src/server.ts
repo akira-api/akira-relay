@@ -33,7 +33,13 @@ export function loadConfigFromEnv(): ServerConfig {
 
   const allowedHosts = process.env.ALLOWLIST_HOSTS
     ? process.env.ALLOWLIST_HOSTS.split(",").map((s) => s.trim())
-    : ["acefile.co", "blogger.com", "googleusercontent.com", "googlevideo.com"];
+    : [
+        "acefile.co",
+        "blogger.com",
+        "miiiixdrop.net",
+        "googleusercontent.com",
+        "googlevideo.com",
+      ];
 
   return {
     port: Number.parseInt(process.env.PORT || "3000", 10),

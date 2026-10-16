@@ -9,6 +9,7 @@ export function detectProvider(urlOrHost: string): string {
     const lower = hostname.toLowerCase();
     if (lower.includes("acefile.co")) return "acefile";
     if (lower.includes("blogger.com")) return "blogger";
+    if (lower.includes("mixdrop")) return "mixdrop";
     return lower || "unknown";
   } catch {
     return "unknown";

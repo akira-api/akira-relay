@@ -6,7 +6,7 @@ Lightweight video stream relay and resolver service designed to stream media fro
 
 - **Direct Stream Relay**: Pipes upstream bytes with backpressure and auto-destruction on client disconnect.
 - **Range Support**: Forwards HTTP `Range` headers to support seeking (`206 Partial Content`).
-- **Batch Hybrid Resolver**: Resolves multiple sources in parallel per quality with sequential fallback intra-quality, returning signed `/v1/stream` URLs.
+- **Batch Hybrid Resolver**: Resolves multiple sources in parallel per quality, tries providers in priority order (`acefile`, `mixdrop`, `blogger`), and returns signed `/v1/stream` URLs.
 - **Token Authorization**: Verifies HMAC-SHA256 signed URLs offline with timing-safe checks.
 - **Persistent SQLite Cache**: Zero-dependency SQLite (`node:sqlite`) cache (default 2 hours TTL), single-flight dedup, negative caching for dead videos, and stale-while-error fallback.
 - **Guardrails**: Global and per-IP concurrency limits, sliding read-idle timeouts, and token-bucket rate limits.
@@ -26,7 +26,7 @@ Mixdrop resolution uses the embed page's direct `wurl` source. The relay forward
 
 ### `POST /internal/resolve` (or `POST /v1/resolve`)
 
-Batch resolver for Akira backend. Accepts candidate sources grouped by resolution, runs hybrid resolution (parallel across resolutions, sequential fallback within each resolution), and returns signed `/v1/stream` URLs.
+Batch resolver for Akira backend. Accepts candidate sources grouped by resolution, tries providers in priority order (`acefile`, `mixdrop`, `blogger`) within each resolution, and returns signed `/v1/stream` URLs.
 
 - **Auth**: Send `X-Relay-Key: <key>` header or `Authorization: Bearer <key>` (checked when `INTERNAL_RELAY_KEY` is configured).
 

@@ -66,6 +66,17 @@ export function detectServer(url: string): string {
   return detectProvider(url);
 }
 
+const PROVIDER_PRIORITY: Record<string, number> = {
+  acefile: 0,
+  mixdrop: 1,
+  blogger: 2,
+};
+
+function providerPriority(candidate: SourceCandidate): number {
+  const provider = candidate.server || candidate.site || detectServer(candidate.url);
+  return PROVIDER_PRIORITY[provider.toLowerCase()] ?? Number.MAX_SAFE_INTEGER;
+}
+
 function checkAuth(
   req: FastifyRequest,
   reply: FastifyReply,
@@ -174,7 +185,9 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
 
     const results = await Promise.all(
       sortedResolutions.map(async (resolution) => {
-        const candidates = groups.get(resolution)!;
+        const candidates = groups.get(resolution)!.sort(
+          (a, b) => providerPriority(a) - providerPriority(b),
+        );
         for (const candidate of candidates) {
           try {
             const streamTarget = `${candidate.url}#${resolution.toLowerCase()}`;

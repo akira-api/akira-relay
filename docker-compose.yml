@@ -1,10 +1,10 @@
 services:
   relay:
-    build:
-      context: .
-      dockerfile: Dockerfile
+    image: ghcr.io/akira-api/akira-relay:latest
     container_name: akira-relay
     restart: unless-stopped
+    security_opt:
+      - apparmor:unconfined
     ports:
       - "3000:3000"
     volumes:
@@ -32,6 +32,8 @@ services:
     image: cloudflare/cloudflared:latest
     container_name: akira-relay-tunnel
     restart: unless-stopped
+    security_opt:
+      - apparmor:unconfined
     command: tunnel --no-autoupdate run
     environment:
       - TUNNEL_TOKEN=${RELAY_TUNNEL_TOKEN}

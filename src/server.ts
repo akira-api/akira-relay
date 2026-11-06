@@ -39,6 +39,7 @@ export function loadConfigFromEnv(): ServerConfig {
         "miiiixdrop.net",
         "googleusercontent.com",
         "googlevideo.com",
+        "mp4upload.com",
       ];
 
   return {

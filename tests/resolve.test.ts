@@ -181,4 +181,32 @@ describe("Resolve & Cache", () => {
     expect(unpacked).toContain('var nfck="458cbc2ff92bd124640d5f01989e6080f5f0fae8"');
     expect(unpacked).toContain('var DUAR=[{"id":"112287004"}]');
   });
+
+  it("registers direct stream with custom headers", async () => {
+    const resolver = new StreamResolver({ allowedHosts: ["mp4upload.com"] });
+    const directUrl = "https://a2.mp4upload.com:183/d/abc/video.mp4";
+    const stream = resolver.registerDirectStream(`${directUrl}#720p`, {
+      headers: { Referer: "https://www.mp4upload.com/" },
+      targetQuality: "720p",
+    });
+
+    expect(stream.directUrl).toBe(directUrl);
+    expect(stream.headers?.Referer).toBe("https://www.mp4upload.com/");
+
+    // Resolve should hit the registered cache
+    const resolved = await resolver.resolve(`${directUrl}#720p`);
+    expect(resolved.directUrl).toBe(directUrl);
+    expect(resolved.headers?.Referer).toBe("https://www.mp4upload.com/");
+    resolver.destroy();
+  });
+
+  it("provides default Referer for mp4upload.com when resolving without prior cache", async () => {
+    const resolver = new StreamResolver({ allowedHosts: ["mp4upload.com"] });
+    const directUrl = "https://a2.mp4upload.com:183/d/abc/video.mp4";
+    const resolved = await resolver.resolve(directUrl);
+
+    expect(resolved.directUrl).toBe(directUrl);
+    expect(resolved.headers?.Referer).toBe("https://www.mp4upload.com/");
+    resolver.destroy();
+  });
 });

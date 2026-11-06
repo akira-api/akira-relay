@@ -57,6 +57,7 @@ export class StreamResolver {
       "miiiixdrop.net",
       "googleusercontent.com",
       "googlevideo.com",
+      "mp4upload.com",
     ];
     this.resolveTimeoutMs = options.resolveTimeoutMs ?? 10000;
   }
@@ -207,6 +208,16 @@ export class StreamResolver {
       }
     } else if (host.includes("miiiixdrop.net")) {
       stream = await resolveMixdrop(key.split("#")[0], this.resolveTimeoutMs);
+    } else if (host.includes("mp4upload.com")) {
+      stream = {
+        directUrl: targetUrl,
+        headers: {
+          Referer: "https://www.mp4upload.com/",
+          "User-Agent":
+            "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+        },
+        ttlMs: 2 * 60 * 60 * 1000,
+      };
     } else {
       // Direct/passthrough video stream (e.g. googlevideo or direct mp4/m3u8)
       stream = {
@@ -218,6 +229,65 @@ export class StreamResolver {
         ttlMs: 30 * 60 * 1000,
       };
     }
+
+    this.cache.setStream(key, stream);
+    if (this.metrics) {
+      this.metrics.cache.size = this.cache.size;
+    }
+    return stream;
+  }
+
+  registerDirectStream(
+    targetUrl: string,
+    options?: {
+      headers?: Record<string, string>;
+      targetQuality?: string;
+      ttlMs?: number;
+    },
+  ): ResolvedStream {
+    let parsed: URL;
+    try {
+      parsed = new URL(targetUrl);
+    } catch {
+      throw new RelayError("INVALID_TOKEN", "Malformed target URL", 400);
+    }
+
+    if (!isHostAllowed(parsed.hostname, this.allowedHosts)) {
+      throw new RelayError(
+        "FORBIDDEN_TARGET",
+        `Target host '${parsed.hostname}' is not permitted`,
+        403,
+      );
+    }
+
+    const rawQuality =
+      options?.targetQuality ||
+      (parsed.hash ? parsed.hash.replace(/^#/, "") : undefined);
+    const effectiveQuality = rawQuality
+      ? normalizeResolution(rawQuality)
+      : undefined;
+
+    const baseUrl = targetUrl.split("#")[0];
+    const normalizedBase = normalizeTargetUrl(baseUrl);
+    const key =
+      effectiveQuality && effectiveQuality !== "default"
+        ? `${normalizedBase}#${effectiveQuality.toLowerCase()}`
+        : normalizedBase;
+
+    const headers: Record<string, string> = {
+      "User-Agent":
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+      ...(parsed.hostname.toLowerCase().includes("mp4upload.com")
+        ? { Referer: "https://www.mp4upload.com/" }
+        : {}),
+      ...(options?.headers || {}),
+    };
+
+    const stream: ResolvedStream = {
+      directUrl: baseUrl,
+      headers,
+      ttlMs: options?.ttlMs ?? 2 * 60 * 60 * 1000,
+    };
 
     this.cache.setStream(key, stream);
     if (this.metrics) {

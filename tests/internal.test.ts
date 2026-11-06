@@ -306,4 +306,53 @@ describe("Batch Resolve Endpoint", () => {
 
     await app.close();
   });
+
+  it("resolves direct mp4 candidate with custom headers without upstream scraping", async () => {
+    const { app, resolver } = await createServer({ secret });
+
+    const resolveSpy = vi.spyOn(resolver, "resolve");
+    const registerSpy = vi.spyOn(resolver, "registerDirectStream");
+
+    const directUrl =
+      "https://a2.mp4upload.com:183/d/xwx57f5bz3b4quuougrqyns2casigqskgn2jqoag3qpxemmxdt3vgaek3x52q3bzpvmbmibn/video.mp4";
+    const res = await app.inject({
+      method: "POST",
+      url: "/internal/resolve",
+      payload: {
+        sources: [
+          {
+            server: "mp4",
+            resolution: "720",
+            url: directUrl,
+            headers: {
+              Referer: "https://www.mp4upload.com/",
+            },
+          },
+        ],
+      },
+    });
+
+    expect(res.statusCode).toBe(200);
+    const body = JSON.parse(res.body);
+    expect(body.streams).toHaveLength(1);
+    expect(body.streams[0].resolution).toBe("720p");
+    expect(body.streams[0].server).toBe("mp4");
+
+    expect(resolveSpy).not.toHaveBeenCalled();
+    expect(registerSpy).toHaveBeenCalledTimes(1);
+
+    const urlObj = new URL(body.streams[0].url, "http://localhost");
+    const verified = verifyStreamToken(
+      urlObj.searchParams.get("u") ?? undefined,
+      urlObj.searchParams.get("e") ?? undefined,
+      urlObj.searchParams.get("s") ?? undefined,
+      secret,
+    );
+
+    const stream = await resolver.resolve(verified.targetUrl);
+    expect(stream.directUrl).toBe(directUrl);
+    expect(stream.headers?.Referer).toBe("https://www.mp4upload.com/");
+
+    await app.close();
+  });
 });

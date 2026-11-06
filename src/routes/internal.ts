@@ -20,6 +20,7 @@ export interface SourceCandidate {
   resolution?: string;
   quality?: string;
   url: string;
+  headers?: Record<string, string>;
 }
 
 export interface ResolvedStreamItem {
@@ -70,6 +71,8 @@ const PROVIDER_PRIORITY: Record<string, number> = {
   acefile: 0,
   mixdrop: 1,
   blogger: 2,
+  mp4: 3,
+  mp4upload: 3,
 };
 
 function providerPriority(candidate: SourceCandidate): number {
@@ -191,10 +194,24 @@ export const internalRoutes: FastifyPluginAsync<InternalRouteOptions> = async (
         for (const candidate of candidates) {
           try {
             const streamTarget = `${candidate.url}#${resolution.toLowerCase()}`;
-            await resolver.resolve(streamTarget, undefined, resolution);
-            const { path } = signStreamUrl(streamTarget, opts.secret, 7200);
             const serverName =
               candidate.server || candidate.site || detectServer(candidate.url);
+            const lowerServer = serverName.toLowerCase();
+            const isDirectCandidate =
+              lowerServer === "mp4" ||
+              lowerServer === "mp4upload" ||
+              candidate.headers !== undefined;
+
+            if (isDirectCandidate) {
+              resolver.registerDirectStream(streamTarget, {
+                headers: candidate.headers,
+                targetQuality: resolution,
+              });
+            } else {
+              await resolver.resolve(streamTarget, undefined, resolution);
+            }
+
+            const { path } = signStreamUrl(streamTarget, opts.secret, 7200);
             return {
               resolution,
               server: serverName,

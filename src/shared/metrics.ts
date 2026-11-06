@@ -10,6 +10,7 @@ export function detectProvider(urlOrHost: string): string {
     if (lower.includes("acefile.co")) return "acefile";
     if (lower.includes("blogger.com")) return "blogger";
     if (lower.includes("mixdrop")) return "mixdrop";
+    if (lower.includes("mp4upload") || lower === "mp4") return "mp4";
     return lower || "unknown";
   } catch {
     return "unknown";

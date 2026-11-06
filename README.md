@@ -19,14 +19,15 @@ Lightweight video stream relay and resolver service designed to stream media fro
 | Acefile | `https://acefile.co/f/<id>` | Source-dependent |
 | Blogger | `https://www.blogger.com/video.g?token=<token>` | 144p–1080p when available |
 | Mixdrop | `https://miiiixdrop.net/e/<id>` | Source-dependent |
+| MP4 / Direct | `https://a2.mp4upload.com:.../video.mp4` | Source-dependent |
 
-Mixdrop resolution uses the embed page's direct `wurl` source. The relay forwards the embed `Referer` and session cookie required by its CDN.
+Mixdrop resolution uses the embed page's direct `wurl` source. The relay forwards the embed `Referer` and session cookie required by its CDN. MP4 / direct sources can include custom `headers` (e.g. `Referer`), bypassing upstream resolution while retaining cache, signed URLs, and relay guardrails.
 
 ## API Specification
 
 ### `POST /internal/resolve` (or `POST /v1/resolve`)
 
-Batch resolver for Akira backend. Accepts candidate sources grouped by resolution, tries providers in priority order (`acefile`, `mixdrop`, `blogger`) within each resolution, and returns signed `/v1/stream` URLs.
+Batch resolver for Akira backend. Accepts candidate sources grouped by resolution, tries providers in priority order (`acefile`, `mixdrop`, `blogger`, `mp4`) within each resolution, and returns signed `/v1/stream` URLs.
 
 - **Auth**: Send `X-Relay-Key: <key>` header or `Authorization: Bearer <key>` (checked when `INTERNAL_RELAY_KEY` is configured).
 
@@ -38,7 +39,8 @@ Batch resolver for Akira backend. Accepts candidate sources grouped by resolutio
     { "server": "blogger", "resolution": "2160p", "url": "https://www.blogger.com/video.g?token=aaa" },
     { "server": "acefile", "resolution": "1080p", "url": "https://acefile.co/f/222" },
     { "server": "blogger", "resolution": "720p",  "url": "https://www.blogger.com/video.g?token=bbb" },
-    { "server": "mixdrop", "resolution": "720p", "url": "https://miiiixdrop.net/e/jdqe04j1a7o7kql" }
+    { "server": "mixdrop", "resolution": "720p", "url": "https://miiiixdrop.net/e/jdqe04j1a7o7kql" },
+    { "server": "mp4", "resolution": "720p", "url": "https://a2.mp4upload.com:183/d/xwx57f5bz3b4quuougrqyns2casigqskgn2jqoag3qpxemmxdt3vgaek3x52q3bzpvmbmibn/video.mp4", "headers": { "Referer": "https://www.mp4upload.com/" } }
   ]
 }
 ```
@@ -66,6 +68,11 @@ Batch resolver for Akira backend. Accepts candidate sources grouped by resolutio
     {
       "resolution": "720p",
       "server": "mixdrop",
+      "url": "/v1/stream?u=...&e=...&s=..."
+    },
+    {
+      "resolution": "720p",
+      "server": "mp4",
       "url": "/v1/stream?u=...&e=...&s=..."
     }
   ]

@@ -178,6 +178,8 @@ Copy `.env.example` to `.env`. Key variables:
 | `IDLE_TIMEOUT_MS` | `20000` | Sliding read-idle timeout; stream destroyed if exceeded |
 | `RESOLVE_TIMEOUT_MS` | `10000` | Upstream resolve/connect timeout before first byte |
 | `INTERNAL_RELAY_KEY` | — | If set, `/internal/resolve` and `/internal/stats` require `X-Relay-Key` header |
+| `USE_PROXY` | `false` | Enable or disable outbound proxy routing (`true` / `false`) |
+| `SOCKS5_PROXY` | — | Outbound SOCKS5/HTTP proxy for resolve & stream relay (e.g. `socks5://akira-xray:1080`) |
 
 ## Project Structure
 

@@ -1,6 +1,12 @@
 import cors from "@fastify/cors";
 import "dotenv/config";
 import Fastify, { type FastifyInstance } from "fastify";
+import {
+  ProxyAgent,
+  setGlobalDispatcher,
+  Socks5ProxyAgent,
+  type Dispatcher,
+} from "undici";
 import { LimitManager } from "./core/limit.js";
 import { StreamResolver } from "./resolve/index.js";
 import { internalRoutes } from "./routes/internal.js";
@@ -23,6 +29,42 @@ export interface ServerConfig {
   connectTimeoutMs?: number;
   sqliteDbPath?: string;
   internalRelayKey?: string;
+  useProxy?: boolean;
+  socks5Proxy?: string;
+}
+
+export function sanitizeProxyUrl(url: string): string {
+  try {
+    const parsed = new URL(url);
+    if (parsed.password) {
+      parsed.password = "****";
+    }
+    return parsed.toString();
+  } catch {
+    return url;
+  }
+}
+
+export function configureOutboundProxy(
+  proxyUrl?: string,
+  connectTimeoutMs = 25000,
+): Dispatcher | null {
+  if (!proxyUrl) return null;
+  const parsed = new URL(proxyUrl);
+  let agent: Dispatcher;
+  if (parsed.protocol.startsWith("socks")) {
+    agent = new Socks5ProxyAgent(proxyUrl, {
+      connect: { timeout: connectTimeoutMs },
+    });
+  } else if (parsed.protocol.startsWith("http")) {
+    agent = new ProxyAgent(proxyUrl, {
+      connect: { timeout: connectTimeoutMs },
+    });
+  } else {
+    throw new Error(`Unsupported proxy protocol: ${parsed.protocol}`);
+  }
+  setGlobalDispatcher(agent);
+  return agent;
 }
 
 export function loadConfigFromEnv(): ServerConfig {
@@ -71,6 +113,10 @@ export function loadConfigFromEnv(): ServerConfig {
     ),
     sqliteDbPath: process.env.SQLITE_DB_PATH || "./data/relay.db",
     internalRelayKey: process.env.INTERNAL_RELAY_KEY,
+    useProxy:
+      process.env.USE_PROXY?.toLowerCase() === "true" ||
+      process.env.USE_PROXY === "1",
+    socks5Proxy: process.env.SOCKS5_PROXY || process.env.ALL_PROXY,
   };
 }
 
@@ -82,6 +128,13 @@ export async function createServer(
   limits: LimitManager;
   metrics: Metrics;
 }> {
+  if (config.useProxy && config.socks5Proxy) {
+    configureOutboundProxy(config.socks5Proxy, config.connectTimeoutMs);
+    logger.info(
+      `Outbound proxy configured: ${sanitizeProxyUrl(config.socks5Proxy)}`,
+    );
+  }
+
   const app = Fastify({
     logger: false,
     trustProxy: true,

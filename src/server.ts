@@ -45,21 +45,14 @@ export function sanitizeProxyUrl(url: string): string {
   }
 }
 
-export function configureOutboundProxy(
-  proxyUrl?: string,
-  connectTimeoutMs = 25000,
-): Dispatcher | null {
+export function configureOutboundProxy(proxyUrl?: string): Dispatcher | null {
   if (!proxyUrl) return null;
   const parsed = new URL(proxyUrl);
   let agent: Dispatcher;
   if (parsed.protocol.startsWith("socks")) {
-    agent = new Socks5ProxyAgent(proxyUrl, {
-      connect: { timeout: connectTimeoutMs },
-    });
+    agent = new Socks5ProxyAgent(proxyUrl);
   } else if (parsed.protocol.startsWith("http")) {
-    agent = new ProxyAgent(proxyUrl, {
-      connect: { timeout: connectTimeoutMs },
-    });
+    agent = new ProxyAgent(proxyUrl);
   } else {
     throw new Error(`Unsupported proxy protocol: ${parsed.protocol}`);
   }
@@ -129,7 +122,7 @@ export async function createServer(
   metrics: Metrics;
 }> {
   if (config.useProxy && config.socks5Proxy) {
-    configureOutboundProxy(config.socks5Proxy, config.connectTimeoutMs);
+    configureOutboundProxy(config.socks5Proxy);
     logger.info(
       `Outbound proxy configured: ${sanitizeProxyUrl(config.socks5Proxy)}`,
     );

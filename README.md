@@ -180,6 +180,8 @@ Copy `.env.example` to `.env`. Key variables:
 | `INTERNAL_RELAY_KEY` | — | If set, `/internal/resolve` and `/internal/stats` require `X-Relay-Key` header |
 | `USE_PROXY` | `false` | Enable or disable outbound proxy routing (`true` / `false`) |
 | `SOCKS5_PROXY` | — | Outbound SOCKS5/HTTP proxy for resolve & stream relay (e.g. `socks5://akira-xray:1080`) |
+| `GATEWAY_URL` | — | Native in-process WebSocket transport gateway URL (e.g. `wss://host/path`) |
+| `GATEWAY_KEY` | — | Access key / UUID for in-process gateway transport |
 
 ## Project Structure
 

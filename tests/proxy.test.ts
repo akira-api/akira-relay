@@ -6,11 +6,17 @@ import {
   loadConfigFromEnv,
   sanitizeProxyUrl,
 } from "../src/server.js";
+import {
+  createGatewayAgent,
+  sanitizeGatewayUrl,
+} from "../src/core/transport.js";
 
 describe("Outbound Proxy Configuration", () => {
   const origDispatcher = getGlobalDispatcher();
   const origProxyEnv = process.env.SOCKS5_PROXY;
   const origUseProxyEnv = process.env.USE_PROXY;
+  const origGatewayUrl = process.env.GATEWAY_URL;
+  const origGatewayKey = process.env.GATEWAY_KEY;
 
   afterEach(() => {
     setGlobalDispatcher(origDispatcher);
@@ -23,6 +29,16 @@ describe("Outbound Proxy Configuration", () => {
       process.env.USE_PROXY = origUseProxyEnv;
     } else {
       delete process.env.USE_PROXY;
+    }
+    if (origGatewayUrl !== undefined) {
+      process.env.GATEWAY_URL = origGatewayUrl;
+    } else {
+      delete process.env.GATEWAY_URL;
+    }
+    if (origGatewayKey !== undefined) {
+      process.env.GATEWAY_KEY = origGatewayKey;
+    } else {
+      delete process.env.GATEWAY_KEY;
     }
   });
 
@@ -89,5 +105,29 @@ describe("Outbound Proxy Configuration", () => {
       socks5Proxy: "socks5://akira-xray:1080",
     });
     expect(getGlobalDispatcher()).toBeInstanceOf(Socks5ProxyAgent);
+  });
+
+  it("sanitizes gateway urls in logs", () => {
+    expect(
+      sanitizeGatewayUrl("wss://nautica.navierr.dev/36.95.152.58-12137"),
+    ).toBe("wss://nautica.navierr.dev/***");
+    expect(sanitizeGatewayUrl("invalid-url")).toBe("gateway-enabled");
+  });
+
+  it("loads GATEWAY_URL and GATEWAY_KEY from environment variables", () => {
+    process.env.GATEWAY_URL = "wss://nautica.navierr.dev/path";
+    process.env.GATEWAY_KEY = "fc60147e-76b8-4bc5-b691-90b2da79e3d2";
+    const config = loadConfigFromEnv();
+    expect(config.gatewayUrl).toBe("wss://nautica.navierr.dev/path");
+    expect(config.gatewayKey).toBe("fc60147e-76b8-4bc5-b691-90b2da79e3d2");
+  });
+
+  it("configures native gateway agent when gateway options are present", async () => {
+    await createServer({
+      secret: "test-secret-at-least-32-chars-long",
+      gatewayUrl: "wss://nautica.navierr.dev/path",
+      gatewayKey: "fc60147e-76b8-4bc5-b691-90b2da79e3d2",
+    });
+    expect(getGlobalDispatcher()).not.toBe(origDispatcher);
   });
 });

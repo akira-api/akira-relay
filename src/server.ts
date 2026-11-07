@@ -8,6 +8,10 @@ import {
   type Dispatcher,
 } from "undici";
 import { LimitManager } from "./core/limit.js";
+import {
+  createGatewayAgent,
+  sanitizeGatewayUrl,
+} from "./core/transport.js";
 import { StreamResolver } from "./resolve/index.js";
 import { internalRoutes } from "./routes/internal.js";
 import { getClientIp, streamRoute } from "./routes/stream.js";
@@ -31,6 +35,8 @@ export interface ServerConfig {
   internalRelayKey?: string;
   useProxy?: boolean;
   socks5Proxy?: string;
+  gatewayUrl?: string;
+  gatewayKey?: string;
 }
 
 export function sanitizeProxyUrl(url: string): string {
@@ -110,6 +116,8 @@ export function loadConfigFromEnv(): ServerConfig {
       process.env.USE_PROXY?.toLowerCase() === "true" ||
       process.env.USE_PROXY === "1",
     socks5Proxy: process.env.SOCKS5_PROXY || process.env.ALL_PROXY,
+    gatewayUrl: process.env.GATEWAY_URL,
+    gatewayKey: process.env.GATEWAY_KEY,
   };
 }
 
@@ -121,7 +129,16 @@ export async function createServer(
   limits: LimitManager;
   metrics: Metrics;
 }> {
-  if (config.useProxy && config.socks5Proxy) {
+  if (config.gatewayUrl && config.gatewayKey) {
+    const agent = createGatewayAgent({
+      gatewayUrl: config.gatewayUrl,
+      gatewayKey: config.gatewayKey,
+    });
+    setGlobalDispatcher(agent);
+    logger.info(
+      `Outbound gateway transport enabled: ${sanitizeGatewayUrl(config.gatewayUrl)}`,
+    );
+  } else if (config.useProxy && config.socks5Proxy) {
     configureOutboundProxy(config.socks5Proxy);
     logger.info(
       `Outbound proxy configured: ${sanitizeProxyUrl(config.socks5Proxy)}`,

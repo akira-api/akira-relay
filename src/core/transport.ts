@@ -177,7 +177,10 @@ export function createGatewayAgent(options: {
   gatewayKey: string;
 }): Agent {
   return new Agent({
-    connect: createGatewayConnector(options.gatewayUrl, options.gatewayKey),
+    connect: createGatewayConnector(
+      options.gatewayUrl,
+      options.gatewayKey,
+    ) as any,
     pipelining: 0,
   });
 }

@@ -1,13 +1,13 @@
 import { Duplex } from "node:stream";
 import tls from "node:tls";
-import { Agent } from "undici";
+import { Agent, buildConnector } from "undici";
 
 function parseUuid(uuidStr: string): Buffer {
   const clean = uuidStr.replace(/-/g, "");
   return Buffer.from(clean, "hex");
 }
 
-function buildTransportHeader(
+export function buildTransportHeader(
   uuidStr: string,
   targetHost: string,
   targetPort: number,
@@ -45,7 +45,7 @@ class GatewayDuplex extends Duplex {
       let buf = Buffer.from(event.data);
       if (!this._respHeaderStripped) {
         this._respHeaderStripped = true;
-        buf = buf.subarray(2);
+        buf = buf.subarray(2); // Strip 2-byte VLESS response header
       }
       if (buf.length > 0) {
         this.push(buf);
@@ -105,19 +105,44 @@ export function sanitizeGatewayUrl(rawUrl: string): string {
   }
 }
 
-export function createGatewayConnector(gatewayUrl: string, gatewayKey: string) {
-  const directAgent = new Agent();
+export function createGatewayConnector(
+  gatewayUrl: string,
+  gatewayKey: string,
+  domains?: string[],
+) {
+  const directConnector = (buildConnector as any)({ allowH2: false });
+  let gatewayHostname = "";
+  try {
+    gatewayHostname = new URL(gatewayUrl).hostname.toLowerCase();
+  } catch {}
+
+  const domainList = domains
+    ?.map((d) => d.trim().toLowerCase())
+    .filter((d) => d.length > 0);
 
   return function gatewayConnector(
     opts: any,
     callback: (err: Error | null, socket?: any) => void,
   ) {
     const { hostname, port, protocol, servername } = opts;
+    const targetHost = (hostname || "").toLowerCase();
     const targetPort = Number(port) || (protocol === "https:" ? 443 : 80);
 
-    const ws = new (globalThis as any).WebSocket(gatewayUrl, {
-      dispatcher: directAgent,
-    });
+    const isGatewayHost = targetHost === gatewayHostname;
+    const matchesDomain =
+      !domainList ||
+      domainList.length === 0 ||
+      domainList.includes("*") ||
+      domainList.some(
+        (d) => targetHost === d || targetHost.endsWith("." + d),
+      );
+
+    // Bypass gateway if connecting directly to the gateway host itself, or outside configured domains
+    if (isGatewayHost || !matchesDomain) {
+      return directConnector(opts, callback);
+    }
+
+    const ws = new (globalThis as any).WebSocket(gatewayUrl);
     ws.binaryType = "arraybuffer";
 
     let settled = false;
@@ -126,11 +151,11 @@ export function createGatewayConnector(gatewayUrl: string, gatewayKey: string) {
     };
 
     ws.onopen = () => {
-      const rawStream = new GatewayDuplex(ws, gatewayKey, hostname, targetPort);
+      const rawStream = new GatewayDuplex(ws, gatewayKey, targetHost, targetPort);
       if (protocol === "https:") {
         const tlsSocket = tls.connect({
           socket: rawStream,
-          servername: servername || hostname,
+          servername: servername || targetHost,
           ALPNProtocols: ["http/1.1"],
         });
 
@@ -175,11 +200,13 @@ export function createGatewayConnector(gatewayUrl: string, gatewayKey: string) {
 export function createGatewayAgent(options: {
   gatewayUrl: string;
   gatewayKey: string;
+  domains?: string[];
 }): Agent {
   return new Agent({
     connect: createGatewayConnector(
       options.gatewayUrl,
       options.gatewayKey,
+      options.domains,
     ) as any,
     pipelining: 0,
   });

@@ -1,12 +1,7 @@
 import cors from "@fastify/cors";
 import "dotenv/config";
 import Fastify, { type FastifyInstance } from "fastify";
-import {
-  ProxyAgent,
-  setGlobalDispatcher,
-  Socks5ProxyAgent,
-  type Dispatcher,
-} from "undici";
+import { setGlobalDispatcher } from "undici";
 import { LimitManager } from "./core/limit.js";
 import {
   createGatewayAgent,
@@ -33,37 +28,10 @@ export interface ServerConfig {
   connectTimeoutMs?: number;
   sqliteDbPath?: string;
   internalRelayKey?: string;
-  useProxy?: boolean;
-  socks5Proxy?: string;
+  gatewayEnabled?: boolean;
   gatewayUrl?: string;
   gatewayKey?: string;
-}
-
-export function sanitizeProxyUrl(url: string): string {
-  try {
-    const parsed = new URL(url);
-    if (parsed.password) {
-      parsed.password = "****";
-    }
-    return parsed.toString();
-  } catch {
-    return url;
-  }
-}
-
-export function configureOutboundProxy(proxyUrl?: string): Dispatcher | null {
-  if (!proxyUrl) return null;
-  const parsed = new URL(proxyUrl);
-  let agent: Dispatcher;
-  if (parsed.protocol.startsWith("socks")) {
-    agent = new Socks5ProxyAgent(proxyUrl);
-  } else if (parsed.protocol.startsWith("http")) {
-    agent = new ProxyAgent(proxyUrl);
-  } else {
-    throw new Error(`Unsupported proxy protocol: ${parsed.protocol}`);
-  }
-  setGlobalDispatcher(agent);
-  return agent;
+  gatewayDomains?: string[];
 }
 
 export function loadConfigFromEnv(): ServerConfig {
@@ -112,12 +80,14 @@ export function loadConfigFromEnv(): ServerConfig {
     ),
     sqliteDbPath: process.env.SQLITE_DB_PATH || "./data/relay.db",
     internalRelayKey: process.env.INTERNAL_RELAY_KEY,
-    useProxy:
-      process.env.USE_PROXY?.toLowerCase() === "true" ||
-      process.env.USE_PROXY === "1",
-    socks5Proxy: process.env.SOCKS5_PROXY || process.env.ALL_PROXY,
+    gatewayEnabled:
+      process.env.GATEWAY_ENABLED?.toLowerCase() === "true" ||
+      process.env.GATEWAY_ENABLED === "1",
     gatewayUrl: process.env.GATEWAY_URL,
     gatewayKey: process.env.GATEWAY_KEY,
+    gatewayDomains: process.env.GATEWAY_DOMAINS
+      ? process.env.GATEWAY_DOMAINS.split(",").map((s) => s.trim())
+      : ["acefile.co"],
   };
 }
 
@@ -129,19 +99,16 @@ export async function createServer(
   limits: LimitManager;
   metrics: Metrics;
 }> {
-  if (config.gatewayUrl && config.gatewayKey) {
+  if (config.gatewayEnabled && config.gatewayUrl && config.gatewayKey) {
     const agent = createGatewayAgent({
       gatewayUrl: config.gatewayUrl,
       gatewayKey: config.gatewayKey,
+      domains: config.gatewayDomains,
     });
     setGlobalDispatcher(agent);
+    const domainList = (config.gatewayDomains || ["acefile.co"]).join(", ");
     logger.info(
-      `Outbound gateway transport enabled: ${sanitizeGatewayUrl(config.gatewayUrl)}`,
-    );
-  } else if (config.useProxy && config.socks5Proxy) {
-    configureOutboundProxy(config.socks5Proxy);
-    logger.info(
-      `Outbound proxy configured: ${sanitizeProxyUrl(config.socks5Proxy)}`,
+      `Outbound gateway transport enabled: ${sanitizeGatewayUrl(config.gatewayUrl)} [domains: ${domainList}]`,
     );
   }
 

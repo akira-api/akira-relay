@@ -178,10 +178,10 @@ Copy `.env.example` to `.env`. Key variables:
 | `IDLE_TIMEOUT_MS` | `20000` | Sliding read-idle timeout; stream destroyed if exceeded |
 | `RESOLVE_TIMEOUT_MS` | `10000` | Upstream resolve/connect timeout before first byte |
 | `INTERNAL_RELAY_KEY` | — | If set, `/internal/resolve` and `/internal/stats` require `X-Relay-Key` header |
-| `USE_PROXY` | `false` | Enable or disable outbound proxy routing (`true` / `false`) |
-| `SOCKS5_PROXY` | — | Outbound SOCKS5/HTTP proxy for resolve & stream relay (e.g. `socks5://akira-xray:1080`) |
-| `GATEWAY_URL` | — | Native in-process WebSocket transport gateway URL (e.g. `wss://host/path`) |
-| `GATEWAY_KEY` | — | Access key / UUID for in-process gateway transport |
+| `GATEWAY_ENABLED` | `false` | Enable or disable native in-process WebSocket outbound gateway (`true` / `false`) |
+| `GATEWAY_URL` | — | Native outbound WebSocket gateway URL (e.g. `wss://host/path`) |
+| `GATEWAY_KEY` | — | Access key / UUID for gateway transport |
+| `GATEWAY_DOMAINS` | `acefile.co` | Comma-separated domain whitelist routed through the gateway (others connect direct) |
 
 ## Project Structure
 

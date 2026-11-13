@@ -27,6 +27,7 @@ export interface ServerConfig {
   resolveTimeoutMs?: number;
   connectTimeoutMs?: number;
   sqliteDbPath?: string;
+  bandwidthRetentionDays?: number;
   internalRelayKey?: string;
   gatewayEnabled?: boolean;
   gatewayUrl?: string;
@@ -79,6 +80,10 @@ export function loadConfigFromEnv(): ServerConfig {
       10,
     ),
     sqliteDbPath: process.env.SQLITE_DB_PATH || "./data/relay.db",
+    bandwidthRetentionDays: Number.parseInt(
+      process.env.BANDWIDTH_RETENTION_DAYS || "30",
+      10,
+    ),
     internalRelayKey: process.env.INTERNAL_RELAY_KEY,
     gatewayEnabled:
       process.env.GATEWAY_ENABLED?.toLowerCase() === "true" ||
@@ -117,7 +122,10 @@ export async function createServer(
     trustProxy: true,
   });
 
-  const metrics = new Metrics();
+  const metrics = new Metrics({
+    dbPath: config.sqliteDbPath,
+    retentionDays: config.bandwidthRetentionDays,
+  });
 
   if (process.env.NODE_ENV !== "test") {
     const isSilentPath = (url: string) =>
@@ -202,6 +210,7 @@ export async function createServer(
   app.addHook("onClose", async () => {
     limits.destroy();
     resolver.destroy();
+    metrics.destroy();
   });
 
   return { app, resolver, limits, metrics };
@@ -210,6 +219,18 @@ export async function createServer(
 async function start() {
   const config = loadConfigFromEnv();
   const { app } = await createServer(config);
+
+  const shutdown = async () => {
+    logger.info("Gracefully shutting down Akira relay...");
+    try {
+      await app.close();
+    } catch (err: any) {
+      logger.error("Error during shutdown:", err?.message || err);
+    }
+    process.exit(0);
+  };
+  process.on("SIGINT", shutdown);
+  process.on("SIGTERM", shutdown);
 
   try {
     const address = await app.listen({ port: config.port ?? 3000, host: "0.0.0.0" });

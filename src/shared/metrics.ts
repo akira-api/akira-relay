@@ -1,3 +1,7 @@
+import Database, { type Database as BetterSqliteDatabase, type Statement } from "better-sqlite3";
+import fs from "node:fs";
+import path from "node:path";
+
 export function detectProvider(urlOrHost: string): string {
   try {
     let hostname = urlOrHost;
@@ -69,6 +73,22 @@ export interface BandwidthStats {
   currentSpeedMbps: number;
   totalStreamedMB: number;
   totalStreamedGB: number;
+  retentionDays?: number;
+}
+
+export interface MetricsOptions {
+  dbPath?: string;
+  retentionDays?: number;
+}
+
+export function getCutoffDate(retentionDays = 30): string {
+  const d = new Date();
+  d.setUTCDate(d.getUTCDate() - retentionDays);
+  return d.toISOString().slice(0, 10);
+}
+
+export function getTodayDate(): string {
+  return new Date().toISOString().slice(0, 10);
 }
 
 export interface LimitCounters {
@@ -118,7 +138,182 @@ export class Metrics {
   errorsByCode: Record<string, number> = {};
   errorsByProvider: Record<string, Record<string, number>> = {};
 
+  readonly retentionDays: number;
+  private db: BetterSqliteDatabase | null = null;
+  private stmtUpsert: Statement | null = null;
+  private stmtSumRecent: Statement | null = null;
+  private stmtSumByProvider: Statement | null = null;
+  private stmtPrune: Statement | null = null;
+  private pendingBytes = new Map<string, number>();
+  private flushInterval: NodeJS.Timeout | null = null;
+  private cleanupInterval: NodeJS.Timeout | null = null;
   private rollingBuckets: SecondBucket[] = [];
+
+  constructor(options?: MetricsOptions) {
+    this.retentionDays = options?.retentionDays ?? 30;
+
+    const resolvedPath =
+      options?.dbPath ??
+      (process.env.NODE_ENV === "test"
+        ? ":memory:"
+        : process.env.SQLITE_DB_PATH || "./data/relay.db");
+
+    this.initDatabase(resolvedPath);
+  }
+
+  private initDatabase(resolvedPath: string): void {
+    if (resolvedPath !== ":memory:") {
+      const dir = path.dirname(resolvedPath);
+      if (!fs.existsSync(dir)) {
+        fs.mkdirSync(dir, { recursive: true });
+      }
+    }
+
+    this.db = new Database(resolvedPath);
+    if (resolvedPath !== ":memory:") {
+      this.db.pragma("journal_mode = WAL");
+    }
+    this.db.pragma("synchronous = NORMAL");
+
+    this.initSchema();
+    this.prepareStatements();
+    this.syncFromDb();
+
+    this.flushInterval = setInterval(() => this.flush(), 5000);
+    this.flushInterval.unref();
+
+    this.cleanupInterval = setInterval(() => this.cleanup(), 60 * 60 * 1000);
+    this.cleanupInterval.unref();
+  }
+
+  private initSchema(): void {
+    if (!this.db) return;
+    this.db.exec(`
+      CREATE TABLE IF NOT EXISTS bandwidth_daily (
+        date TEXT NOT NULL,
+        provider TEXT NOT NULL,
+        bytes INTEGER NOT NULL DEFAULT 0,
+        PRIMARY KEY (date, provider)
+      );
+      CREATE INDEX IF NOT EXISTS idx_bandwidth_date ON bandwidth_daily(date);
+    `);
+  }
+
+  private prepareStatements(): void {
+    if (!this.db) return;
+    this.stmtUpsert = this.db.prepare(`
+      INSERT INTO bandwidth_daily (date, provider, bytes)
+      VALUES (?, ?, ?)
+      ON CONFLICT(date, provider) DO UPDATE SET bytes = bytes + excluded.bytes
+    `);
+    this.stmtSumRecent = this.db.prepare(`
+      SELECT SUM(bytes) as total_bytes
+      FROM bandwidth_daily
+      WHERE date >= ?
+    `);
+    this.stmtSumByProvider = this.db.prepare(`
+      SELECT provider, SUM(bytes) as total_bytes
+      FROM bandwidth_daily
+      WHERE date >= ?
+      GROUP BY provider
+    `);
+    this.stmtPrune = this.db.prepare(`
+      DELETE FROM bandwidth_daily
+      WHERE date < ?
+    `);
+  }
+
+  syncFromDb(): void {
+    if (!this.db || !this.stmtSumRecent || !this.stmtSumByProvider || !this.stmtPrune) {
+      return;
+    }
+
+    const cutoff = getCutoffDate(this.retentionDays);
+    this.stmtPrune.run(cutoff);
+
+    const totalRow = this.stmtSumRecent.get(cutoff) as
+      | { total_bytes: number | null }
+      | undefined;
+    this.streams.bytesStreamed = Number(totalRow?.total_bytes ?? 0);
+
+    for (const key of Object.keys(this.streams.byProvider)) {
+      this.streams.byProvider[key].bytesStreamed = 0;
+      this.streams.byProvider[key].bytesStreamedMB = 0;
+    }
+
+    const providerRows = this.stmtSumByProvider.all(cutoff) as Array<{
+      provider: string;
+      total_bytes: number | null;
+    }>;
+
+    for (const row of providerRows) {
+      const p = this.getOrCreateStreamProvider(row.provider);
+      p.bytesStreamed = Number(row.total_bytes ?? 0);
+      p.bytesStreamedMB =
+        Math.round((p.bytesStreamed / (1024 * 1024)) * 100) / 100;
+    }
+  }
+
+  cleanup(): void {
+    this.flush();
+    this.syncFromDb();
+  }
+
+  flush(): void {
+    if (!this.db || !this.stmtUpsert || this.pendingBytes.size === 0) {
+      return;
+    }
+
+    const entries = Array.from(this.pendingBytes.entries());
+    this.pendingBytes.clear();
+
+    const insertMany = this.db.transaction((items: [string, number][]) => {
+      for (const [key, bytes] of items) {
+        const sepIndex = key.indexOf("::");
+        const date = key.slice(0, sepIndex);
+        const provider = key.slice(sepIndex + 2);
+        this.stmtUpsert!.run(date, provider, bytes);
+      }
+    });
+
+    try {
+      insertMany(entries);
+    } catch {
+      for (const [key, bytes] of entries) {
+        this.pendingBytes.set(key, (this.pendingBytes.get(key) || 0) + bytes);
+      }
+    }
+  }
+
+  resetBandwidth(): void {
+    this.pendingBytes.clear();
+    if (this.db) {
+      this.db.prepare("DELETE FROM bandwidth_daily").run();
+    }
+    this.streams.bytesStreamed = 0;
+    for (const key of Object.keys(this.streams.byProvider)) {
+      this.streams.byProvider[key].bytesStreamed = 0;
+      this.streams.byProvider[key].bytesStreamedMB = 0;
+    }
+  }
+
+  destroy(): void {
+    if (this.flushInterval) {
+      clearInterval(this.flushInterval);
+      this.flushInterval = null;
+    }
+    if (this.cleanupInterval) {
+      clearInterval(this.cleanupInterval);
+      this.cleanupInterval = null;
+    }
+    this.flush();
+    if (this.db) {
+      try {
+        this.db.close();
+      } catch {}
+      this.db = null;
+    }
+  }
 
   private getOrCreateResolveProvider(provider: string): ProviderResolveStats {
     if (!this.resolve.byProvider[provider]) {
@@ -209,6 +404,13 @@ export class Metrics {
       p.bytesStreamedMB =
         Math.round((p.bytesStreamed / (1024 * 1024)) * 100) / 100;
     }
+
+    if (this.db) {
+      const today = getTodayDate();
+      const prov = provider || "unknown";
+      const key = `${today}::${prov}`;
+      this.pendingBytes.set(key, (this.pendingBytes.get(key) || 0) + bytes);
+    }
   }
 
   countError(code: string, provider?: string): void {
@@ -240,6 +442,7 @@ export class Metrics {
       currentSpeedMbps: this.getCurrentSpeedMbps(),
       totalStreamedMB: Math.round((bytes / (1024 * 1024)) * 100) / 100,
       totalStreamedGB: Math.round((bytes / (1024 * 1024 * 1024)) * 1000) / 1000,
+      retentionDays: this.retentionDays,
     };
   }
 
